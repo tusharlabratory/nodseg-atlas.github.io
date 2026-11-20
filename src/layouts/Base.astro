@@ -1,0 +1,73 @@
+---
+import "../styles/global.css";
+interface Props { title: string; description?: string; active?: string }
+const { title, description = "How reliable are open-access lung nodule segmentation models? Eight configurations of seven methods in 10 public CT datasets.", active = "" } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const nav = [
+  ["Explorer", "/explorer"], ["Network", "/network"], ["Build", "/build"], ["Methods", "/methods"], ["Datasets", "/datasets"],
+  ["Features", "/features"], ["Repeatability", "/repeatability"], ["Classification", "/classification"], ["About", "/about"],
+];
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title === "NodSeg Atlas" ? title : `${title} · NodSeg Atlas`}</title>
+  <meta name="description" content={description} />
+  <meta property="og:title" content={title} />
+  <meta property="og:description" content={description} />
+  <link rel="icon" type="image/svg+xml" href={`${base}/favicon.svg`} />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href={`${base}/`} aria-label="NodSeg Atlas home"><img src={`${base}/brand/tusharlab-mark.svg`} alt="Tushar Lab" /><span class="sep"></span>NodSeg Atlas</a>
+      <button class="nav-toggle" aria-label="Menu" onclick="document.querySelector('.nav').classList.toggle('open')">☰</button>
+      <nav class="nav">
+        {nav.map(([label, href]) => <a href={`${base}${href}/`} class={active === href ? "active" : ""}>{label}</a>)}
+      </nav>
+    </div>
+  </header>
+  <main>
+    <slot />
+  </main>
+  <footer class="site-footer">
+    <div class="wrap affil">
+      <a href="https://tusharlabratory.github.io/" aria-label="Tushar Lab"><img class="lab" src={`${base}/brand/tusharlab-logo-crop.svg`} alt="Tushar Lab" /></a>
+      <span class="div" aria-hidden="true"></span>
+      <a href="https://radiology.arizona.edu/" aria-label="Department of Radiology and Imaging Sciences, University of Arizona"><img class="dept" src={`${base}/brand/radiology-imaging-sciences.png`} alt="Radiology and Imaging Sciences, University of Arizona" /></a>
+    </div>
+    <div class="wrap cols">
+      <div>
+        <b style="font-family:var(--font-head);font-size:1.05rem">NodSeg Atlas</b>
+        <p style="margin-top:6px">Results of a multidataset study of open-access lung nodule segmentation models: segmentation performance, agreement of radiomic features with radiologists, test–retest repeatability and classification. All numbers are aggregated study results with 95% confidence intervals; the only images are the figures of the article.</p>
+      </div>
+      <div>
+        <b>Explore</b><br />
+        <a href={`${base}/explorer/`}>Explorer</a><br />
+        <a href={`${base}/network/`}>Network</a><br />
+        <a href={`${base}/build/`}>Build a comparison</a><br />
+        <a href={`${base}/methods/`}>Methods</a><br />
+        <a href={`${base}/datasets/`}>Datasets</a><br />
+        <a href="https://tusharlabratory.github.io/lungfm-atlas.github.io/">LungFM Atlas (companion site)</a>
+      </div>
+      <div>
+        <b>Lab</b><br />
+        <a href="https://tusharlabratory.github.io/">Tushar Lab</a><br />
+        <a href="https://radiology.arizona.edu/">Department of Radiology and Imaging Sciences</a><br />
+        University of Arizona<br />
+        <a href={`${base}/about/`}>About, citation and data</a>
+      </div>
+    </div>
+    <div class="wrap copy">
+      <span>© 2026 The Arizona Board of Regents on behalf of The University of Arizona.</span>
+      <span>Tushar Lab · Department of Radiology and Imaging Sciences</span>
+    </div>
+  </footer>
+  <div class="tip" id="tip"></div>
+</body>
+</html>

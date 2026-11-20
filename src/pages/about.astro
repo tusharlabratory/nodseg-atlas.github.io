@@ -1,0 +1,49 @@
+---
+import Base from "../layouts/Base.astro";
+import meta from "../data/meta.json";
+import datasets from "../data/datasets.json";
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const md = (s: string) => s.replace(/\*(.+?)\*/g, "<i>$1</i>");
+const files = [
+  ["segmentation.json", "Nodules segmented, Dice, HD95 and volume ratio by method and dataset, pooled and by size, with 95% CIs"],
+  ["radiomics.json", "Radiomic agreement: Δ and median CCC by method and dataset, by feature family, and per feature"],
+  ["repeatability.json", "Test–retest ICC (summary and per feature), volume repeatability and registered test–retest Dice"],
+  ["classification.json", "Classification AUC by mask source and baseline, differences from reference masks, diameter and Lung-RADS, specificity at 90% sensitivity"],
+  ["methods.json", "Configurations, prompts, versions and training-data status"],
+  ["datasets.json", "Dataset characteristics (Table 1), reference standards and training-data status"],
+];
+---
+<Base title="About" active="/about" description="About NodSeg Atlas: methods in brief, limitations, data and how to cite.">
+  <div class="page-head"><div class="wrap">
+    <h1>About</h1>
+    <p>NodSeg Atlas presents the results of one study of open-access lung nodule segmentation models. Everything here is taken from the article and its analysis files; every number that appears in the article was checked against it when the site was built.</p>
+  </div></div>
+  <div class="wrap">
+    <section class="two">
+      <div>
+        <h2 style="margin-top:0">The study in brief</h2>
+        <p><b>Purpose.</b> {meta.abstract.Purpose}</p>
+        <p><b>Materials and methods.</b> {meta.abstract["Materials and Methods"]}</p>
+        <p><b>Results.</b> <span set:html={md(meta.abstract.Results)} /></p>
+        <p><b>Conclusion.</b> {meta.abstract.Conclusion}</p>
+        <h2>Limitations</h2>
+        <p>{meta.limitations}</p>
+      </div>
+      <div>
+        <h2 style="margin-top:0">Cite</h2>
+        <div class="card"><div class="kicker">Article</div><p style="margin:.3em 0 0"><b>{meta.title}</b><br /><span class="muted">Preprint link coming soon.</span></p></div>
+        <h2>Download the results</h2>
+        <table class="tbl">
+          {files.map(([f, d]) => <tr><td><a href={`${base}/data/${f}`} download><b>{f}</b></a></td><td class="muted">{d}</td></tr>)}
+        </table>
+        <p class="muted" style="font-size:.85rem;margin-top:10px">Aggregated results only. Data availability, as stated in the article: {meta.data_availability}</p>
+        <h2>Datasets</h2>
+        <ul class="muted" style="font-size:.85rem;padding-left:18px">
+          {datasets.map((d) => <li><b>{d.name}</b>: {d.reference.replace(/ doi:\S+$/, "")}{d.doi && <> <a href={`https://doi.org/${d.doi}`}>doi:{d.doi}</a></>}</li>)}
+        </ul>
+        <h2>Contact</h2>
+        <p>Built by the <a href="https://tusharlabratory.github.io/">Tushar Lab</a>, Department of Radiology and Imaging Sciences, University of Arizona. Companion site: <a href="https://tusharlabratory.github.io/lungfm-atlas.github.io/">LungFM Atlas</a>.</p>
+      </div>
+    </section>
+  </div>
+</Base>

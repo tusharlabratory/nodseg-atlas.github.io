@@ -1,0 +1,120 @@
+---
+// Home-page finding cards: one number, one small chart, one plain headline; the paper's own sentence on demand.
+// Numbers come from the exported analysis tables (checked against the manuscript by site_export.py).
+import meta from "../data/meta.json";
+import seg from "../data/segmentation.json";
+import radio from "../data/radiomics.json";
+import rep from "../data/repeatability.json";
+import cls from "../data/classification.json";
+
+const METHODS = ["nnInteractive", "TotalSegmentator", "MedSAM2", "PiNS", "VoxTell", "VISTA3D-Auto", "VISTA3D-Point", "SAM-Med3D"];
+const COL: Record<string, string> = { "nnInteractive": "#0C234B", "TotalSegmentator": "#AB0520", "MedSAM2": "#3D92C8", "PiNS": "#7F8B5A",
+  "VoxTell": "#C9A227", "VISTA3D-Auto": "#8E6BBF", "VISTA3D-Point": "#81CEEB", "SAM-Med3D": "#94A3B8" };
+const F = "DM Sans, Arial, sans-serif", INK = "#1E293B", MUTED = "#64748B", GRID = "#CBD5E1";
+const W = 320;
+const sg = (x: number, d = 3) => (Math.abs(x) < 0.5 * 10 ** -d ? "" : x > 0 ? "+" : "−") + Math.abs(x).toFixed(d);
+const nm = (x: number, d = 2) => (x < 0 ? "−" : "") + Math.abs(x).toFixed(d);
+const t = (x: number, y: number, s: string, o: any = {}) =>
+  `<text x="${x}" y="${y}" font-family="${F}" font-size="${o.size ?? 10.5}" fill="${o.fill ?? INK}"${o.anchor ? ` text-anchor="${o.anchor}"` : ""}${o.weight ? ` font-weight="${o.weight}"` : ""}>${s}</text>`;
+function axis(lo: number, hi: number, x0: number, x1: number, y: number, ticks: number[], fmt: (v: number) => string) {
+  const X = (v: number) => x0 + ((v - lo) / (hi - lo)) * (x1 - x0);
+  let a = `<line x1="${x0}" x2="${x1}" y1="${y}" y2="${y}" stroke="${INK}" stroke-width=".8"/>`;
+  for (const v of ticks) a += `<line x1="${X(v)}" x2="${X(v)}" y1="${y}" y2="${y + 3}" stroke="${INK}" stroke-width=".8"/>` + t(X(v), y + 14, fmt(v), { anchor: "middle", size: 10, fill: MUTED });
+  return { X, a };
+}
+function forest(rows: { name: string; v: number[]; color: string; bold?: boolean }[], lo: number, hi: number, ticks: number[], fmt: (v: number) => string, label: string, refs: { v: number; dash: string; text?: string }[] = [], L = 104) {
+  const rh = 15, top = 8, yAx = top + rows.length * rh + 4;
+  const { X, a } = axis(lo, hi, L, W - 22, yAx, ticks, fmt);
+  let g = refs.map((r) => `<line x1="${X(r.v)}" x2="${X(r.v)}" y1="${top - 2}" y2="${yAx}" stroke="${r.text ? "#AB0520" : GRID}" stroke-dasharray="${r.dash}"/>` + (r.text ? t(X(r.v) + 3, top + 2, r.text, { size: 9, fill: "#AB0520" }) : "")).join("");
+  rows.forEach((r, i) => {
+    const y = top + i * rh + rh / 2;
+    g += t(L - 6, y + 3.5, r.name, { anchor: "end", size: 9.8, weight: r.bold ? 700 : 400 }) +
+      `<line x1="${X(Math.max(lo, r.v[1]))}" x2="${X(Math.min(hi, r.v[2]))}" y1="${y}" y2="${y}" stroke="${r.color}" stroke-width="1.8"/><circle cx="${X(Math.max(lo, Math.min(hi, r.v[0])))}" cy="${y}" r="3.8" fill="${r.color}"/>`;
+  });
+  g += t((L + W - 22) / 2, yAx + 28, label, { anchor: "middle", size: 10, fill: MUTED });
+  return `<svg viewBox="0 0 ${W} ${yAx + 34}" role="img" aria-label="${label}">${g}${a}</svg>`;
+}
+
+// 1. coverage of small nodules (pooled, ≤8 mm)
+const small = seg.pooled.filter((x: any) => x.group === "≤8 mm" && x.method !== "Inter-reader agreement");
+const sm = (m: string) => small.find((x: any) => x.method === m)!;
+const c1 = (() => {
+  const rows = [...small].sort((a: any, b: any) => b.pct - a.pct);
+  const rh = 15, top = 6, L = 104, yAx = top + rows.length * rh + 4;
+  const { X, a } = axis(0, 100, L, W - 34, yAx, [0, 25, 50, 75, 100], (v) => `${v}%`);
+  let g = "";
+  rows.forEach((r: any, i: number) => {
+    const y = top + i * rh;
+    g += t(L - 6, y + 10, r.method, { anchor: "end", size: 9.8 }) + `<rect x="${L}" y="${y + 2}" width="${Math.max(1.5, X(r.pct) - L)}" height="10" rx="2.5" fill="${COL[r.method]}"/>` +
+      t(X(r.pct) + 4, y + 10.5, `${r.pct.toFixed(1)}%`, { size: 9.5, fill: MUTED });
+  });
+  g += t((L + W - 34) / 2, yAx + 28, "Nodules ≤8 mm segmented (all datasets)", { anchor: "middle", size: 10, fill: MUTED });
+  return `<svg viewBox="0 0 ${W} ${yAx + 34}" role="img" aria-label="Percentage of nodules of 8 mm or smaller segmented by each method">${g}${a}</svg>`;
+})();
+
+// 2. similar Dice, different shape features (QIBA)
+const qd = (m: string) => seg.by_dataset.find((x: any) => x.dataset === "QIBA" && x.method === m)!;
+const qr = (m: string) => radio.summary.find((x: any) => x.dataset === "QIBA" && x.set === "all lesions" && x.method === m)!;
+const c2 = forest(["nnInteractive", "MedSAM2"].map((m) => ({ name: m, v: qr(m).family_delta.shape, color: COL[m], bold: true })),
+  -0.4, 0.05, [-0.4, -0.3, -0.2, -0.1, 0], (v) => (v === 0 ? "0" : sg(v, 1)), "Shape-feature Δ vs inter-reader, QIBA", [{ v: 0, dash: "3 3" }], 90);
+
+// 3. QIBA Δ for every configuration, with the prespecified margin
+const qiba = METHODS.map((m) => radio.summary.find((x: any) => x.dataset === "QIBA" && x.method === m && x.set === (m === "VoxTell" ? "prespecified VoxTell set (8 unseen patients)" : "all lesions"))!);
+const c3 = forest(qiba.map((x: any) => ({ name: x.method, v: x.delta, color: COL[x.method], bold: x.method === "nnInteractive" })),
+  -0.8, 0.05, [-0.8, -0.6, -0.4, -0.2, 0], (v) => (v === 0 ? "0" : sg(v, 1)), "Δ, radiomic agreement vs inter-reader (QIBA)", [{ v: 0, dash: "3 3" }, { v: -0.05, dash: "4 2", text: "−0.05" }]);
+
+// 4. repeatability (RIDER-Seg same-day pairs)
+const rider = METHODS.map((m) => rep.summary.find((x: any) => x.set === "RIDER-Seg same-day pairs" && x.method === m)!);
+const c4 = forest(rider.map((x: any) => ({ name: x.method, v: x.delta_icc, color: COL[x.method], bold: x.method === "nnInteractive" })),
+  -0.2, 0.05, [-0.2, -0.1, 0], (v) => (v === 0 ? "0" : sg(v, 1)), "Δ ICC vs manual contour (RIDER-Seg)", [{ v: 0, dash: "3 3" }]);
+
+// 5. classification, nnInteractive minus reference masks
+const nni = ["IMD-CT", "LIDC-IDRI", "LNDb"].map((d) => ({ d, x: cls.find((q: any) => q.dataset === d && q.source === "nnInteractive")! }));
+const c5 = forest(nni.map(({ d, x }) => ({ name: d, v: (x as any).d_reference, color: COL.nnInteractive, bold: true })),
+  -0.06, 0.03, [-0.06, -0.03, 0, 0.03], (v) => (v === 0 ? "0" : sg(v, 2)), "AUC, nnInteractive masks minus reference masks", [{ v: 0, dash: "3 3" }]);
+
+// 6. screening (DLCS24): Lung-RADS, diameter, radiomics
+const dl = (s: string) => cls.find((q: any) => q.dataset === "DLCS24" && q.source === s)!;
+const c6 = forest([
+  { name: "Lung-RADS", v: dl("Lung-RADS category").auc, color: "#1A1A1A", bold: true },
+  { name: "Diameter", v: dl("Diameter").auc, color: "#64748B", bold: true },
+  ...METHODS.map((m) => ({ name: m, v: dl(m).auc, color: COL[m] })).sort((a, b) => b.v[0] - a.v[0]),
+], 0.5, 0.9, [0.5, 0.6, 0.7, 0.8, 0.9], (v) => v.toFixed(1), "AUC for cancer, DLCS24 screening");
+
+const q = meta.quotes as any;
+const md = (s: string) => s.replace(/\*(.+?)\*/g, "<i>$1</i>");
+const cards = [
+  { stat: `100% vs ≤${sm("TotalSegmentator").pct.toFixed(1)}%`, sub: `nodules ≤8 mm segmented: nnInteractive vs methods given no location (n = ${sm("nnInteractive").n})`, head: "Without a nodule location, methods missed many small nodules", svg: c1, full: q.coverage },
+  { stat: `${qd("nnInteractive").dice[0].toFixed(2)} vs ${qd("MedSAM2").dice[0].toFixed(2)}`, sub: `median Dice in QIBA, nnInteractive vs MedSAM2; shape-feature Δ ${sg(qr("nnInteractive").family_delta.shape[0])} vs ${sg(qr("MedSAM2").family_delta.shape[0])}`, head: "Similar Dice did not mean similar radiomic features", svg: c2, full: q.dice_vs_features },
+  { stat: "0 of 8", sub: `configurations met the prespecified criterion (Δ margin −0.05); smallest gap, nnInteractive ${sg(qiba[0].delta[0])}`, head: "No method matched agreement between five radiologists on radiomic features", svg: c3, full: q.criterion },
+  { stat: sg(rider[0].delta_icc[0]), sub: `median Δ ICC, nnInteractive vs manual contour (95% CI: ${nm(rider[0].delta_icc[1], 3)}, ${nm(rider[0].delta_icc[2], 3)}); 28 same-day pairs`, head: "Given one point, repeatability was close to manual contours in large tumors", svg: c4, full: q.repeat },
+  { stat: `${sg(Math.max(...nni.map((z: any) => z.x.d_reference[0])))} to ${sg(Math.min(...nni.map((z: any) => z.x.d_reference[0])))}`, sub: "AUC difference, nnInteractive masks minus reference masks (IMD-CT, LIDC-IDRI, LNDb)", head: "Point-prompted masks lost little classification performance", svg: c5, full: q.classification },
+  { stat: `${dl("nnInteractive").auc[0].toFixed(2)} vs ${dl("Diameter").auc[0].toFixed(2)}`, sub: `best radiomic AUC vs diameter in DLCS24; Lung-RADS ${dl("Lung-RADS category").auc[0].toFixed(2)}`, head: "In screening, radiomics did not beat diameter and stayed below Lung-RADS", svg: c6, full: q.screening },
+];
+---
+<div class="fgrid">
+  {cards.map((c) => (
+    <article class="fcard">
+      <div class="fstat">{c.stat}</div>
+      <div class="fsub">{c.sub}</div>
+      <h3>{c.head}</h3>
+      <div class="fchart" set:html={c.svg} />
+      <details><summary>From the paper</summary><p set:html={md(c.full)} /></details>
+    </article>
+  ))}
+</div>
+
+<style>
+  .fgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+  @media (max-width: 980px) { .fgrid { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 640px) { .fgrid { grid-template-columns: 1fr; } }
+  .fcard { background: #fff; border: 1px solid var(--line); border-top: 3px solid var(--az-red); border-radius: 12px; padding: 16px 18px 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; }
+  .fstat { font-family: var(--font-head); font-size: 1.9rem; font-weight: 700; color: var(--az-red); line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .fsub { font-size: .78rem; color: var(--muted); margin: 3px 0 8px; }
+  .fcard h3 { font-family: var(--font); font-size: 1rem; font-weight: 700; color: var(--head); line-height: 1.35; margin: 0 0 10px; }
+  .fchart { margin-top: auto; }
+  .fchart :global(svg) { width: 100%; height: auto; display: block; }
+  details { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+  summary { cursor: pointer; font-size: .82rem; font-weight: 600; color: var(--arroyo); }
+  details p { font-size: .84rem; color: #334155; margin: 8px 0 2px; }
+</style>

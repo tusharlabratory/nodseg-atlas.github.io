@@ -1,0 +1,219 @@
+---
+import Base from "../layouts/Base.astro";
+---
+<Base title="Build a comparison" active="/build" description="Pick datasets, methods and a measure; see the best performers in your selection and download a figure.">
+  <div class="page-head"><div class="wrap">
+    <h1>Build a comparison</h1>
+    <p>Choose what matters for your study, the datasets that look like your data, and the methods you could run. The page finds the best performers in your selection and draws a figure you can download.</p>
+  </div></div>
+  <div class="wrap buildgrid">
+    <div>
+      <div class="step" style="border-top:0">
+        <span class="n">1</span>
+        <div><h3>What matters to you?</h3>
+          <p class="muted" style="font-size:.86rem;margin:0 0 8px">One measure at a time.</p>
+          <div class="chips" id="metric"></div></div>
+      </div>
+      <div class="step">
+        <span class="n">2</span>
+        <div><h3>Datasets <button class="mini" data-all="ds">all</button><button class="mini" data-none="ds">none</button></h3>
+          <p class="muted" style="font-size:.86rem;margin:0 0 8px">Faded boxes have no result for the chosen measure.</p>
+          <div class="chips" id="ds"></div></div>
+      </div>
+      <div class="step">
+        <span class="n">3</span>
+        <div><h3>Methods <button class="mini" data-all="m">all</button><button class="mini" data-none="m">none</button></h3>
+          <p class="muted" style="font-size:.86rem;margin:0 0 8px">Quick picks:
+            <button class="mini" data-pick="loc">given a location</button><button class="mini" data-pick="auto">automatic</button></p>
+          <div class="chips" id="m"></div>
+          <h4 class="sub">Comparators</h4>
+          <div class="chips" id="c"></div></div>
+      </div>
+      <div class="step">
+        <span class="n">4</span>
+        <div><h3>Options</h3>
+          <label class="opt"><input type="checkbox" id="extOnly" /> Only results on datasets outside the method's published training data</label></div>
+      </div>
+    </div>
+    <div class="results">
+      <div class="resultcard">
+        <div class="kicker">Best in your selection</div>
+        <div id="best"></div>
+      </div>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="resultcard" style="margin-top:8px">
+      <div class="kicker">Dataset by dataset</div>
+      <div class="scroll-x"><table class="tbl" id="per" style="font-size:.86rem"></table></div>
+    </div>
+    <section style="padding-top:8px">
+      <div class="step">
+        <span class="n">5</span>
+        <div style="min-width:0">
+          <h3>Figure</h3>
+          <div class="controls" style="margin:6px 0 12px">
+            <label>Figure type
+              <div class="seg" id="fig"><button data-v="forest" class="on">Forest plot</button><button data-v="heat">Heat map</button><button data-v="rank">Ranking</button></div>
+            </label>
+            <label>Download
+              <span style="display:flex;gap:6px">
+                <button class="btn btn-primary" style="padding:6px 12px;font-size:.86rem" id="dpng">PNG (300 dpi)</button>
+                <button class="btn btn-outline" style="padding:6px 12px;font-size:.86rem" id="dsvg">SVG</button>
+                <button class="btn btn-outline" style="padding:6px 12px;font-size:.86rem" id="dcsv">CSV</button>
+                <button class="btn btn-outline" style="padding:6px 12px;font-size:.86rem" id="dlink">Copy link</button>
+              </span>
+            </label>
+          </div>
+          <div class="figbox scroll-x" id="figure"></div>
+          <div class="note" style="margin-top:12px"><b>Suggested legend.</b> <span id="legendtxt"></span></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</Base>
+
+<style is:global>
+  .buildgrid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 28px; padding-top: 18px; align-items: start; }
+  @media (max-width: 1000px) { .buildgrid { grid-template-columns: 1fr; } }
+  .results { position: sticky; top: 84px; }
+  @media (max-width: 1000px) { .results { position: static; } }
+  .resultcard { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; box-shadow: var(--shadow); }
+  .resultcard .kicker { font-size: .74rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--az-red); margin-bottom: 6px; }
+  .bestgrid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .bestgrid div { background: var(--panel); border-radius: 10px; padding: 10px 12px; border: 1px solid var(--line); }
+  .bestgrid b.big { display: block; font-family: var(--font-head); font-size: 1.15rem; color: var(--head); line-height: 1.2; }
+  .bestgrid span { font-size: .8rem; color: var(--muted); }
+  h4.sub { font-family: var(--font); font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 14px 0 6px; }
+  .figbox { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .figbox svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  .opt { display: flex; gap: 8px; align-items: center; font-size: .9rem; }
+</style>
+
+<script>
+  import { getJSON, BASE, METHODS, METHOD_COLOR, SEG_DS, CLS_DS, trainStatus, seqColor, divColor } from "../scripts/lib.js";
+  import { forestSVG, heatSVG, rankSVG, download, downloadPNG } from "../scripts/figs.js";
+  const [seg, radio, cls, methods] = await Promise.all([getJSON("segmentation.json"), getJSON("radiomics.json"), getJSON("classification.json"), getJSON("methods.json")]);
+  const M = Object.fromEntries(methods.map((m) => [m.name, m]));
+  const MULTI = ["QIBA", "LIDC-IDRI", "LNDb", "QIN"];
+  const METRICS = {
+    pct: { label: "Nodules segmented", lower: "percentage of nodules segmented", sub: "coverage, %", ds: SEG_DS, comps: [], higher: true },
+    dice: { label: "Dice with the reference", lower: "Dice with the reference", sub: "median, segmented nodules", ds: SEG_DS, comps: ["Inter-reader agreement"], higher: true },
+    delta: { label: "Radiomic agreement", lower: "radiomic Δ", sub: "Δ vs readers (multireader datasets)", ds: MULTI, comps: [], higher: true },
+    auc: { label: "Classification AUC", lower: "classification AUC", sub: "radiomic model", ds: CLS_DS, comps: ["Reference masks", "Diameter", "Lung-RADS category"], higher: true },
+  };
+  const st = { metric: "dice", ds: new Set(SEG_DS), m: new Set(METHODS), c: new Set(["Inter-reader agreement", "Reference masks", "Diameter", "Lung-RADS category"]), ext: false, fig: "forest" };
+  try {
+    const h = new URLSearchParams(location.hash.slice(1));
+    if (h.get("k") && METRICS[h.get("k")]) st.metric = h.get("k");
+    if (h.has("d")) st.ds = new Set(h.get("d").split(",").filter(Boolean));
+    if (h.has("m")) st.m = new Set(h.get("m").split(",").filter(Boolean).map((i) => METHODS[+i]).filter(Boolean));
+    if (h.get("x") === "1") st.ext = true;
+    if (h.get("f")) st.fig = h.get("f");
+  } catch (e) { /* ignore a malformed link */ }
+
+  function val(d, src) {
+    const k = st.metric;
+    if (k === "pct" || k === "dice") {
+      const x = seg.by_dataset.find((q) => q.dataset === d && q.method === src);
+      if (!x) return null;
+      if (k === "pct") return x.pct == null ? null : { est: x.pct, lo: 100 - x.miss_ci[1], hi: 100 - x.miss_ci[0], n: `${x.n_seg} of ${x.n}` };
+      return { est: x.dice[0], lo: x.dice[1], hi: x.dice[2], n: x.n_seg != null ? `${x.n_seg} of ${x.n} segmented` : `${x.n} nodules` };
+    }
+    if (k === "delta") {
+      const x = radio.summary.find((q) => q.dataset === d && q.method === src && q.set === (d === "QIBA" && src === "VoxTell" ? "prespecified VoxTell set (8 unseen patients)" : "all lesions"));
+      return x && x.delta ? { est: x.delta[0], lo: x.delta[1], hi: x.delta[2], n: `${x.n_seg} of ${x.n} segmented` } : null;
+    }
+    const x = cls.find((q) => q.dataset === d && q.source === src && ["method", "reference", "baseline"].includes(q.kind));
+    return x ? { est: x.auc[0], lo: x.auc[1], hi: x.auc[2], n: x.kind === "method" ? `${x.n_seg} of ${x.n} segmented` : `${x.n} nodules` } : null;
+  }
+  const outside = (m, d) => trainStatus(M[m].training[d]) === "no";
+  const chip = (set, key, label, sub, off) => `<button class="chip${set.has(key) ? " on" : ""}${off ? " off" : ""}" data-key="${key}">${label}${sub ? `<small>${sub}</small>` : ""}</button>`;
+  function drawChips() {
+    const K = METRICS[st.metric];
+    document.getElementById("metric").innerHTML = Object.entries(METRICS).map(([k, v]) => `<button class="chip${k === st.metric ? " on" : ""}" data-key="${k}">${v.label}<small>${v.sub}</small></button>`).join("");
+    const allDs = ["QIBA", "LIDC-IDRI", "LNDb", "IMD-CT", "NSCLC-RG", "QIN", "LUAD-Surv", "DLCS24", "LUNA25-Dev"];
+    document.getElementById("ds").innerHTML = allDs.map((d) => chip(st.ds, d, d, "", !K.ds.includes(d))).join("");
+    document.getElementById("m").innerHTML = METHODS.map((m) => chip(st.m, m, m, `${M[m].interface}${M[m].noncommercial_weights ? " · noncommercial" : ""}`)).join("");
+    document.getElementById("c").innerHTML = K.comps.length ? K.comps.map((c) => chip(st.c, c, c, "")).join("") : `<span class="muted" style="font-size:.85rem">None for this measure.</span>`;
+    document.getElementById("extOnly").checked = st.ext;
+    [...document.getElementById("fig").children].forEach((b) => b.classList.toggle("on", b.dataset.v === st.fig));
+  }
+  const fmt = (v) => st.metric === "pct" ? `${v.toFixed(1)}%` : st.metric === "delta" ? (Math.abs(v) < 0.0005 ? "0.000" : (v > 0 ? "+" : "") + v.toFixed(3).replace("-", "−")) : v.toFixed(2);
+  function render() {
+    drawChips();
+    const K = METRICS[st.metric];
+    const ds = K.ds.filter((d) => st.ds.has(d));
+    const ms = METHODS.filter((m) => st.m.has(m));
+    const comps = K.comps.filter((c) => st.c.has(c));
+    const best = document.getElementById("best"), per = document.getElementById("per"), fig = document.getElementById("figure");
+    if (!ds.length || !ms.length) { best.innerHTML = `<p class="muted">Select at least one dataset with results for this measure and one method.</p>`; per.innerHTML = ""; fig.innerHTML = ""; fig.dataset.svg = ""; return; }
+    const ok = (m, d) => !st.ext || outside(m, d);
+    const summary = ms.map((m) => { const v = ds.filter((d) => ok(m, d)).map((d) => val(d, m)).filter(Boolean).map((x) => x.est); return { m, k: v.length, mean: v.length ? v.reduce((a, b) => a + b, 0) / v.length : null, min: Math.min(...v), max: Math.max(...v) }; }).filter((r) => r.k);
+    summary.sort((a, b) => (b.k === ds.length) - (a.k === ds.length) || b.mean - a.mean);
+    const full = summary.filter((r) => r.k === ds.length);
+    const top = full[0] ?? summary[0];
+    best.innerHTML = top ? `<div class="bestgrid">
+      <div><span>Highest mean ${K.lower} over ${ds.length} dataset${ds.length > 1 ? "s" : ""}</span><b class="big">${top.m}</b><span>${fmt(top.mean)}${top.k < ds.length ? ` (${top.k} of ${ds.length} datasets)` : ""}${full.length > 1 ? ` · then ${full.slice(1, 3).map((r) => `${r.m} ${fmt(r.mean)}`).join(", ")}` : ""}</span></div>
+      <div><span>How ${top.m} is prompted</span><b class="big">${M[top.m].interface}</b><span>${M[top.m].prompt}</span></div>
+      <div><span>Training data of ${top.m}</span><b class="big">${ds.filter((d) => !outside(top.m, d)).length ? `${ds.filter((d) => ["yes", "partly"].includes(trainStatus(M[top.m].training[d]))).length} of ${ds.length} selected datasets in or partly in it${ds.filter((d) => ["undisclosed", "possibly"].includes(trainStatus(M[top.m].training[d]))).length ? `; ${ds.filter((d) => ["undisclosed", "possibly"].includes(trainStatus(M[top.m].training[d]))).length} undisclosed` : ""}` : "All selected datasets outside it"}</b><span>${ds.filter((d) => !outside(top.m, d)).map((d) => `${d}: ${M[top.m].training[d]}`).join("; ") || "per the published training data (Table S2)"}</span></div>
+    </div><p class="muted" style="font-size:.8rem;margin:10px 0 0">Means are over the selected datasets; intervals overlap in many datasets, so treat a rank as a starting point.${st.metric === "dice" ? " Dice is on the nodules each method segmented: check coverage too." : ""}${st.ext ? " Only results outside each method's published training data are counted." : ""}</p>` : `<p class="muted">No result outside the training data for this selection.</p>`;
+    per.innerHTML = `<thead><tr><th>Dataset</th><th>Best selected method</th><th>Value (95% CI)</th><th>Training data</th>${comps.length ? "<th>Comparators</th>" : ""}</tr></thead><tbody>` + ds.map((d) => {
+      const b = ms.filter((m) => ok(m, d)).map((m) => ({ m, v: val(d, m) })).filter((x) => x.v).sort((a, c) => c.v.est - a.v.est)[0];
+      const cs = comps.map((c) => ({ c, v: val(d, c) })).filter((x) => x.v);
+      return `<tr><td><a href="${BASE}/datasets/${d.toLowerCase()}/">${d}</a></td><td>${b ? `<a href="${BASE}/methods/${M[b.m].id}/"><b>${b.m}</b></a>` : "–"}</td><td class="num">${b ? `${fmt(b.v.est)} (${fmt(b.v.lo)}, ${fmt(b.v.hi)})<br><span class="muted" style="font-size:.76rem">${b.v.n}</span>` : ""}</td>
+        <td style="font-size:.8rem">${b ? M[b.m].training[d] : ""}</td>${comps.length ? `<td style="font-size:.8rem">${cs.map((x) => `<i>${x.c}</i> ${fmt(x.v.est)}`).join("<br>")}</td>` : ""}</tr>`;
+    }).join("") + "</tbody>";
+    // figure
+    const range = { pct: [0, 100], dice: [0, 1], delta: [-0.9, 0.1], auc: [0.3, 1] }[st.metric];
+    const axis = { pct: "Nodules segmented, % (95% CI)", dice: "Median Dice (95% CI)", delta: "Δ, radiomic agreement vs inter-reader (95% CI)", auc: "AUC (95% CI)" }[st.metric];
+    const digits = { pct: 1, dice: 2, delta: 3, auc: 2 }[st.metric];
+    let svg, legend;
+    const mark = (m, d) => ({ yes: " ●", partly: " ◐", possibly: " ◌", undisclosed: " ?", no: "" })[trainStatus(M[m].training[d])];
+    if (st.fig === "forest") {
+      const blocks = ds.map((d) => ({ task: d, items: [
+        ...ms.filter((m) => ok(m, d)).map((m) => ({ m, v: val(d, m) })).filter((x) => x.v).sort((a, b) => b.v.est - a.v.est).map(({ m, v }) => ({ name: m + mark(m, d), est: v.est, lo: v.lo, hi: v.hi, color: METHOD_COLOR[m] })),
+        ...comps.map((c) => ({ c, v: val(d, c) })).filter((x) => x.v).map(({ c, v }) => ({ name: c, est: v.est, lo: v.lo, hi: v.hi, color: METHOD_COLOR[c] ?? "#1A1A1A", comparator: true })),
+      ] }));
+      svg = forestSVG(blocks, { axisLabel: axis, range, ref: st.metric === "delta" ? -0.05 : st.metric === "auc" ? 0.5 : null, digits });
+      legend = `Forest plot shows ${{ pct: "the percentage of nodules segmented (a mask component within 5 mm of the annotated center), with Wilson 95% CIs", dice: "the median Dice similarity coefficient with the reference on segmented nodules, with 95% CIs from a patient-level bootstrap", delta: "Δ, the median over 107 radiomic features of the method's concordance with the readers minus the concordance between readers, with 95% CIs from a patient-level bootstrap; the dashed line marks the prespecified margin of −0.05", auc: "the area under the receiver operating characteristic curve (AUC) of an L2-penalized logistic regression on 107 radiomic features from each mask source, with 95% CIs from a patient-level bootstrap; comparators are diamonds" }[st.metric]}, by dataset. Symbols: ● dataset in the method's published training data, ◐ partly, ◌ possibly, ? training data not disclosed.`;
+    } else if (st.fig === "heat") {
+      const color = st.metric === "delta" ? (v) => divColor(v) : st.metric === "pct" ? (v) => seqColor(v, 0, 100) : st.metric === "auc" ? (v) => seqColor(v, 0.4, 0.9) : (v) => seqColor(v, 0, 1);
+      const f = st.metric === "pct" ? (v) => v.toFixed(0) : st.metric === "delta" ? (v) => (v > 0 ? "+" : "") + v.toFixed(2).replace("-", "−").replace("0.", ".") : (v) => v.toFixed(2).replace(/^0/, "");
+      const key = { values: { pct: [0, 25, 50, 75, 100], dice: [0, 0.25, 0.5, 0.75, 1], delta: [-0.3, -0.1, 0, 0.1, 0.3], auc: [0.5, 0.6, 0.7, 0.8, 0.9] }[st.metric], label: axis.replace(" (95% CI)", "") };
+      const rows = [...ms, ...comps];
+      svg = heatSVG(rows, ds.map((d) => ({ label: d, d })), (r, c) => { if (METHODS.includes(r) && !ok(r, c.d)) return null; const v = val(c.d, r); return v ? { v: v.est } : null; }, { sepAfter: ms.length - 1, comparatorRows: new Set(comps), color, fmt: f, key });
+      legend = `Heat map shows ${axis.replace(" (95% CI)", "").toLowerCase()} for each method (rows) in each dataset (columns)${comps.length ? ", with comparators below" : ""}. Empty cells: no result${st.ext ? " or dataset in the method's training data" : ""}.`;
+    } else {
+      const items = summary.map((r) => ({ name: r.m, mean: r.mean, min: r.min, max: r.max, color: METHOD_COLOR[r.m], k: r.k, n: ds.length }));
+      svg = rankSVG(items, { axisLabel: `Mean ${axis.replace(" (95% CI)", "").toLowerCase()} over the selected datasets`, range, digits });
+      legend = `Dot plot shows the mean ${axis.replace(" (95% CI)", "").toLowerCase()} over the ${ds.length} selected dataset${ds.length > 1 ? "s" : ""}; the shaded bar spans the lowest to highest dataset value (not a CI). Methods with fewer datasets show the count in parentheses. The ranking is descriptive.`;
+    }
+    fig.innerHTML = svg; fig.dataset.svg = svg;
+    document.getElementById("legendtxt").textContent = legend;
+    history.replaceState(null, "", "#" + new URLSearchParams({ k: st.metric, d: [...st.ds].join(","), m: METHODS.map((m, i) => (st.m.has(m) ? i : -1)).filter((i) => i >= 0).join(","), x: st.ext ? "1" : "0", f: st.fig }).toString());
+    window.__csv = () => {
+      const L = [["dataset", "source", "measure", "estimate", "ci_low", "ci_high", "n", "training_data"].join(",")];
+      for (const d of ds) for (const s of [...ms, ...comps]) { const v = val(d, s); if (!v || (METHODS.includes(s) && !ok(s, d))) continue; L.push([d, s, st.metric, v.est.toFixed(4), v.lo.toFixed(4), v.hi.toFixed(4), `"${v.n}"`, METHODS.includes(s) ? `"${M[s].training[d]}"` : ""].join(",")); }
+      return L.join("\n");
+    };
+  }
+  function toggler(id, key) {
+    document.getElementById(id).addEventListener("click", (e) => { const b = e.target.closest(".chip"); if (!b) return; const k = b.dataset.key; st[key].has(k) ? st[key].delete(k) : st[key].add(k); render(); });
+  }
+  document.getElementById("metric").addEventListener("click", (e) => { const b = e.target.closest(".chip"); if (!b) return; st.metric = b.dataset.key; render(); });
+  toggler("ds", "ds"); toggler("m", "m"); toggler("c", "c");
+  document.querySelectorAll("[data-all]").forEach((b) => (b.onclick = () => { st[b.dataset.all] = new Set(b.dataset.all === "ds" ? ["QIBA", "LIDC-IDRI", "LNDb", "IMD-CT", "NSCLC-RG", "QIN", "LUAD-Surv", "DLCS24", "LUNA25-Dev"] : METHODS); render(); }));
+  document.querySelectorAll("[data-none]").forEach((b) => (b.onclick = () => { st[b.dataset.none] = new Set(); render(); }));
+  document.querySelectorAll("[data-pick]").forEach((b) => (b.onclick = () => { const p = b.dataset.pick; st.m = new Set(METHODS.filter((m) => p === "loc" ? M[m].location : p === "auto" ? !M[m].location : !M[m].noncommercial_weights)); render(); }));
+  document.getElementById("extOnly").onchange = (e) => { st.ext = e.target.checked; render(); };
+  document.getElementById("fig").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; st.fig = b.dataset.v; render(); });
+  const fname = () => `nodseg-atlas_${st.metric}_${st.fig}`;
+  document.getElementById("dsvg").onclick = () => download(fname() + ".svg", document.getElementById("figure").dataset.svg || "", "image/svg+xml");
+  document.getElementById("dpng").onclick = () => downloadPNG(fname() + ".png", document.getElementById("figure").dataset.svg || "", 300 / 96);
+  document.getElementById("dcsv").onclick = () => download(fname() + ".csv", window.__csv ? window.__csv() : "", "text/csv");
+  document.getElementById("dlink").onclick = async (e) => { try { await navigator.clipboard.writeText(location.href); e.target.textContent = "Link copied"; setTimeout(() => (e.target.textContent = "Copy link"), 1500); } catch { prompt("Copy this link", location.href); } };
+  // default datasets include every dataset so switching measures keeps a selection
+  if (!new URLSearchParams(location.hash.slice(1)).has("d")) st.ds = new Set(["QIBA", "LIDC-IDRI", "LNDb", "IMD-CT", "NSCLC-RG", "QIN", "LUAD-Surv", "DLCS24", "LUNA25-Dev"]);
+  render();
+</script>

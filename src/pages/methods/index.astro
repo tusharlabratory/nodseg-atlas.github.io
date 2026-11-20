@@ -1,0 +1,44 @@
+---
+import Base from "../../layouts/Base.astro";
+import methods from "../../data/methods.json";
+import seg from "../../data/segmentation.json";
+import radio from "../../data/radiomics.json";
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const groups = [
+  ["Given the nodule location", "A point (or a point and a box) at the annotated nodule center.", methods.filter((m) => m.location)],
+  ["Automatic (no nodule location)", "A text prompt or no prompt; the mask component nearest the nodule is kept.", methods.filter((m) => !m.location)],
+] as const;
+const pooled = (n: string) => seg.pooled.find((q) => q.group === "All nodules" && q.method === n)!;
+const small = (n: string) => seg.pooled.find((q) => q.group === "≤8 mm" && q.method === n)!;
+const qiba = (n: string) => radio.summary.find((q) => q.dataset === "QIBA" && q.method === n && q.set === (n === "VoxTell" ? "prespecified VoxTell set (8 unseen patients)" : "all lesions"))!;
+const f3 = (x: number) => (x > 0 ? "+" : "") + x.toFixed(3).replace("-", "−");
+---
+<Base title="Methods" active="/methods" description="Eight configurations of seven open-access lung nodule segmentation methods.">
+  <div class="page-head"><div class="wrap">
+    <h1>Methods</h1>
+    <p>Eight configurations of seven open-access methods, each run with its released weights, published preprocessing and default settings. VISTA3D was run twice: with a point and with its lung tumor class and no point.</p>
+  </div></div>
+  <div class="wrap">
+    {groups.map(([t, d, ms]) => (
+      <section>
+        <h2 style="margin-top:0">{t}</h2>
+        <p class="muted">{d}</p>
+        <div class="grid">
+          {ms.map((m) => (
+            <a class="card" href={`${base}/methods/${m.id}/`}>
+              <div class="kicker">{m.interface}</div>
+              <h3>{m.name}</h3>
+              <p class="muted" style="font-size:.85rem;margin:0 0 8px">{m.version}{m.noncommercial_weights ? " · noncommercial weights" : ""}</p>
+              <table class="tbl" style="font-size:.84rem">
+                <tr><td>Nodules segmented</td><td class="num"><b>{pooled(m.name).pct.toFixed(1)}%</b></td></tr>
+                <tr><td>Nodules ≤8 mm segmented</td><td class="num">{small(m.name).pct.toFixed(1)}%</td></tr>
+                <tr><td>Median Dice, all datasets</td><td class="num">{pooled(m.name).dice[0].toFixed(2)}</td></tr>
+                <tr><td>Radiomic Δ, QIBA</td><td class="num">{f3((qiba(m.name) as any).delta[0])}</td></tr>
+              </table>
+            </a>
+          ))}
+        </div>
+      </section>
+    ))}
+  </div>
+</Base>

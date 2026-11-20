@@ -1,0 +1,104 @@
+---
+import Base from "../layouts/Base.astro";
+---
+<Base title="Repeatability" active="/repeatability" description="Test–retest repeatability of radiomic features, mask overlap and volume for eight segmentation configurations.">
+  <div class="page-head"><div class="wrap">
+    <h1>Test–retest repeatability</h1>
+    <p>The same tumor scanned twice: do the measurements stay the same? Feature intraclass correlation (ICC), registered test–retest Dice and the volume repeatability coefficient (RC) of each method, compared with the manual contour.</p>
+  </div></div>
+  <div class="wrap">
+    <div class="controls">
+      <label>Scan pairs
+        <select id="set">
+          <option value="RIDER-Seg same-day pairs" selected>RIDER-Seg: 28 pairs about 15 minutes apart (main)</option>
+          <option value="QIBA same-day pairs">QIBA: same-day pairs, five radiologists</option>
+          <option value="QIBA pairs months apart">QIBA: pairs months apart (RIDER Pilot)</option>
+        </select>
+      </label>
+      <label>Show
+        <select id="metric">
+          <option value="dicc" selected>Δ ICC, method minus manual</option>
+          <option value="rc">Volume repeatability coefficient (%)</option>
+          <option value="vd">Volume difference between scans (%)</option>
+          <option value="rtd">Registered test–retest Dice</option>
+        </select>
+      </label>
+    </div>
+    <div class="figbox scroll-x" id="fig"></div>
+    <p class="note" id="explain" style="margin-top:12px"></p>
+    <h2>All repeatability results</h2>
+    <div class="scroll-x"><table class="tbl" id="tab"></table></div>
+    <h2>Feature by feature</h2>
+    <p class="muted">Test–retest ICC of each of the 107 features: the manual contour first, then each method. Blue at 0.90 or higher; red below.</p>
+    <div class="scroll-x"><div id="grid"></div></div>
+  </div>
+</Base>
+
+<style is:global>
+  .figbox { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .figbox svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  .igrid { display: grid; grid-template-columns: auto auto; gap: 2px 10px; align-items: center; font-size: .82rem; }
+  .igrid .nm { text-align: right; font-weight: 600; white-space: nowrap; }
+  .idots { display: flex; gap: 1px; }
+  .idots i { width: 8px; height: 15px; border-radius: 2px; display: inline-block; cursor: pointer; }
+</style>
+
+<script>
+  import { getJSON, tooltip, BASE, METHODS, METHOD_COLOR, f2, ci3, BLUES } from "../scripts/lib.js";
+  import { forestSVG } from "../scripts/figs.js";
+  const tip = tooltip();
+  const [rep, methods] = await Promise.all([getJSON("repeatability.json"), getJSON("methods.json")]);
+  const mid = Object.fromEntries(methods.map((m) => [m.name, m.id]));
+  const st = { set: "RIDER-Seg same-day pairs", metric: "dicc" };
+  const months = () => st.set === "QIBA pairs months apart";
+  function render() {
+    const rows = rep.summary.filter((x) => x.set === st.set);
+    const man = rows.find((x) => x.method === "Manual"), meth = METHODS.map((m) => rows.find((x) => x.method === m));
+    const opt = document.querySelector('#metric [value="rc"]'), opt2 = document.querySelector('#metric [value="rtd"]');
+    opt.disabled = months(); opt2.disabled = months();
+    if (months() && ["rc", "rtd"].includes(st.metric)) { st.metric = "dicc"; document.getElementById("metric").value = "dicc"; }
+    let items, svg, axis;
+    const lab = (x) => `${x.method}${x.pairs_used != null ? ` (${x.pairs_used} pairs)` : x.vol_pairs != null ? ` (${x.vol_pairs})` : ""}`;
+    if (st.metric === "dicc") {
+      items = meth.map((x) => ({ name: lab(x), est: x.delta_icc[0], lo: x.delta_icc[1], hi: x.delta_icc[2], color: METHOD_COLOR[x.method] }));
+      svg = forestSVG([{ task: `Δ ICC vs manual contour (manual median ICC ${f2(man?.median_icc_manual ?? meth[0].median_icc_manual)})`, items }], { axisLabel: "Δ ICC, method minus manual (95% CI)", range: [-0.25, 0.25], ref: 0, digits: 3 });
+    } else if (st.metric === "rc" || st.metric === "vd") {
+      const k = st.metric === "rc" ? "rc" : "vol_diff";
+      items = [man, ...meth].filter((x) => x && x[k]).map((x) => ({ name: x.method, est: x[k][0], lo: x[k][1], hi: x[k][2], color: METHOD_COLOR[x.method], comparator: x.method === "Manual" }));
+      const hi = st.metric === "rc" ? 160 : 120;
+      svg = forestSVG([{ task: st.metric === "rc" ? "Volume repeatability coefficient (values beyond the axis are clipped; see the table)" : "Median absolute volume difference between scans", items }], { axisLabel: st.metric === "rc" ? "Volume RC, % (95% CI)" : "Volume difference, % (95% CI)", range: [0, hi], ref: null, digits: 1 });
+    } else {
+      items = [man, ...meth].filter((x) => x && x.rt_dice).map((x) => ({ name: x.method, est: x.rt_dice[0], lo: x.rt_dice[1], hi: x.rt_dice[2], color: METHOD_COLOR[x.method], comparator: x.method === "Manual" }));
+      svg = forestSVG([{ task: "Registered test–retest Dice, median (IQR)", items }], { axisLabel: "Test–retest Dice, median (IQR)", range: [0.5, 1], ref: null, digits: 2 });
+    }
+    document.getElementById("fig").innerHTML = svg;
+    document.getElementById("explain").textContent = {
+      dicc: "Δ ICC is the median over 107 features of the method's test–retest ICC (two-way random effects, absolute agreement, single measurement) minus the manual contour's ICC, on pairs the method segmented on both scans. Negative means less repeatable than manual contours.",
+      rc: "The volume repeatability coefficient is the change in volume that 95% of repeat measurements of an unchanged nodule would not exceed (2.77 × within-subject coefficient of variation of log volume). Smaller is better.",
+      vd: "Median absolute difference between the two volumes, as a percentage of their mean." + (months() ? " Months-apart pairs mix real nodule change with measurement error and do not measure repeatability." : ""),
+      rtd: "Dice between a source's masks on the two scans after rigid registration of the retest scan. High test–retest Dice does not imply accuracy: SAM-Med3D drew repeatable masks that largely missed the tumor.",
+    }[st.metric];
+    let t = `<thead><tr><th>Source</th><th>Pairs used</th><th>Median feature ICC</th><th>Δ ICC (95% CI)</th>${st.set.startsWith("RIDER") ? "<th>Holm P</th>" : ""}<th>Test–retest Dice</th><th>Volume difference, %</th><th>Volume RC, %</th></tr></thead><tbody>`;
+    [man, ...meth].filter(Boolean).forEach((x) => {
+      const isM = x.method === "Manual";
+      t += `<tr><td>${isM ? "<i>Manual</i>" : `<a href="${BASE}/methods/${mid[x.method]}/"><b>${x.method}</b></a>`}</td><td class="num">${x.pairs_used ?? x.vol_pairs ?? ""}</td>
+        <td class="num">${isM ? f2(meth[0].median_icc_manual) : f2(x.median_icc)}</td><td class="num">${isM ? "Reference" : ci3(x.delta_icc)}</td>
+        ${st.set.startsWith("RIDER") ? `<td class="num">${isM ? "" : x.p_holm > 0.99 ? ">.99" : x.p_holm.toFixed(2).replace(/^0/, "")}</td>` : ""}
+        <td class="num">${x.rt_dice ? `${f2(x.rt_dice[0])} (${f2(x.rt_dice[1])}–${f2(x.rt_dice[2])})` : "–"}</td>
+        <td class="num">${x.vol_diff ? `${x.vol_diff[0].toFixed(1)} (${x.vol_diff[1].toFixed(1)}, ${x.vol_diff[2].toFixed(1)})` : "–"}</td>
+        <td class="num">${x.rc && !months() ? `${x.rc[0].toFixed(0)} (${x.rc[1].toFixed(0)}, ${x.rc[2].toFixed(0)})` : "–"}</td></tr>`;
+    });
+    document.getElementById("tab").innerHTML = t + "</tbody>";
+    // feature grid
+    const F = rep.features[st.set];
+    const col = (v) => v == null ? "#eef1f4" : v >= 0.9 ? BLUES[Math.min(4, Math.floor((v - 0.9) / 0.02))] : v < 0.5 ? "#850000" : ["#C62840", "#D45E70", "#E08996", "#F2C4CC"][Math.min(3, Math.floor((v - 0.5) / 0.1))];
+    let g = `<div class="igrid"><div class="nm"><i>Manual</i></div><div class="idots">${F.map((f) => `<i style="background:${col(f.manual)}" data-t="${f.feature}: manual ${f.manual?.toFixed(3)}"></i>`).join("")}</div>`;
+    METHODS.forEach((m) => { g += `<div class="nm"><a href="${BASE}/methods/${mid[m]}/">${m}</a></div><div class="idots">${F.map((f) => `<i style="background:${col(f.icc[m])}" data-t="${f.feature}: ${m} ${f.icc[m]?.toFixed(3) ?? "NA"} · manual ${f.manual?.toFixed(3)}"></i>`).join("")}</div>`; });
+    document.getElementById("grid").innerHTML = g + "</div>";
+  }
+  document.getElementById("grid").addEventListener("mousemove", (ev) => { const i = ev.target.closest("i[data-t]"); if (!i) return tip.hide(); tip.show(i.dataset.t, ev); });
+  document.getElementById("grid").addEventListener("mouseleave", () => tip.hide());
+  document.getElementById("set").onchange = (e) => { st.set = e.target.value; render(); };
+  document.getElementById("metric").onchange = (e) => { st.metric = e.target.value; render(); };
+  render();
+</script>

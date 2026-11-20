@@ -1,0 +1,127 @@
+---
+import Base from "../../layouts/Base.astro";
+import Forest from "../../components/Forest.astro";
+import methods from "../../data/methods.json";
+import seg from "../../data/segmentation.json";
+import radio from "../../data/radiomics.json";
+import rep from "../../data/repeatability.json";
+import cls from "../../data/classification.json";
+
+export function getStaticPaths() {
+  return methods.map((m) => ({ params: { id: m.id }, props: { m } }));
+}
+const { m } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const COL: Record<string, string> = { "nnInteractive": "#0C234B", "TotalSegmentator": "#AB0520", "MedSAM2": "#3D92C8", "PiNS": "#7F8B5A",
+  "VoxTell": "#C9A227", "VISTA3D-Auto": "#8E6BBF", "VISTA3D-Point": "#4BA3CF", "SAM-Med3D": "#7A8696" };
+const color = COL[m.name];
+const SEG_DS = ["QIBA", "LIDC-IDRI", "LNDb", "IMD-CT", "NSCLC-RG", "QIN", "LUAD-Surv"];
+const ts = (t: string) => (t.startsWith("Yes") ? "yes" : t.startsWith("Partly") ? "partly" : t.startsWith("Possibly") ? "possibly" : t.startsWith("Undisclosed") ? "undisclosed" : "no");
+const TL: Record<string, string> = { yes: "In training data", partly: "Partly", possibly: "Possibly", undisclosed: "Not disclosed", no: "Outside" };
+const mark = (d: string) => ({ yes: " ●", partly: " ◐", possibly: " ◌", undisclosed: " ?", no: "" } as any)[ts(m.training[d])];
+
+const segRows = SEG_DS.map((d) => {
+  const x = seg.by_dataset.find((q) => q.dataset === d && q.method === m.name)!;
+  return { label: `${d}${mark(d)}`, est: x.dice[0], lo: x.dice[1], hi: x.dice[2], color, sub: `· ${x.pct!.toFixed(1)}% of ${x.n} segmented` };
+});
+const pooled = seg.pooled.find((q) => q.group === "All nodules" && q.method === m.name)!;
+segRows.push({ label: "All datasets pooled", est: pooled.dice[0], lo: pooled.dice[1], hi: pooled.dice[2], color: "#1a1a1a", sub: `· ${pooled.pct.toFixed(1)}% of ${pooled.n}`, bold: true, sep: true } as any);
+const sizeRows = ["≤8 mm", ">8–20 mm", ">20–30 mm", ">30 mm"].map((g) => {
+  const x = seg.pooled.find((q) => q.group === g && q.method === m.name)!;
+  return { g, x };
+});
+const MULTI = ["QIBA", "LIDC-IDRI", "LNDb", "QIN"];
+const radRows = MULTI.map((d) => {
+  const set = d === "QIBA" && m.name === "VoxTell" ? "prespecified VoxTell set (8 unseen patients)" : "all lesions";
+  const x = radio.summary.find((q) => q.dataset === d && q.method === m.name && q.set === set)!;
+  return { label: `${d}${mark(d)}${set !== "all lesions" ? " (prespecified 20)" : ""}${d === "QIN" ? " (algorithm masks)" : ""}`, est: x.delta![0], lo: x.delta![1], hi: x.delta![2], color, sub: `· ${x.n_seg} of ${x.n}`, bold: d === "QIBA" };
+});
+const qiba = radio.summary.find((q) => q.dataset === "QIBA" && q.method === m.name && q.set === (m.name === "VoxTell" ? "prespecified VoxTell set (8 unseen patients)" : "all lesions")) as any;
+const repRows = ["RIDER-Seg same-day pairs", "QIBA same-day pairs", "QIBA pairs months apart"].map((s) => {
+  const x = rep.summary.find((q) => q.set === s && q.method === m.name)!;
+  return { label: s.replace(" pairs", ""), est: x.delta_icc![0], lo: x.delta_icc![1], hi: x.delta_icc![2], color, sub: `· ${x.pairs_used} pairs` };
+});
+const rider = rep.summary.find((q) => q.set === "RIDER-Seg same-day pairs" && q.method === m.name)!;
+const riderMan = rep.summary.find((q) => q.set === "RIDER-Seg same-day pairs" && q.method === "Manual")!;
+const clsRows = ["IMD-CT", "LIDC-IDRI", "LNDb", "DLCS24", "LUNA25-Dev"].map((d) => {
+  const x = cls.find((q) => q.dataset === d && q.source === m.name)!;
+  return { label: `${d}${mark(d)}`, est: x.auc[0], lo: x.auc[1], hi: x.auc[2], color, sub: `· ${x.n_seg} of ${x.n}` };
+});
+const dRows = ["IMD-CT", "LIDC-IDRI", "LNDb"].map((d) => {
+  const x = cls.find((q) => q.dataset === d && q.source === m.name) as any;
+  return { label: d, est: x.d_reference[0], lo: x.d_reference[1], hi: x.d_reference[2], color };
+});
+const f3 = (x: number) => (Math.abs(x) < 0.0005 ? "0.000" : (x > 0 ? "+" : "") + x.toFixed(3).replace("-", "−"));
+const rcTxt = `${(rider as any).rc[0].toFixed(0)}% (${(rider as any).rc[1].toFixed(0)}, ${(rider as any).rc[2].toFixed(0)}); manual contour ${(riderMan as any).rc[0].toFixed(0)}%`;
+---
+<Base title={m.name} active="/methods" description={`${m.name}: segmentation, radiomic agreement, repeatability and classification in 10 CT datasets.`}>
+  <div class="page-head"><div class="wrap">
+    <p style="margin-bottom:6px"><a href={`${base}/methods/`}>← All methods</a></p>
+    <h1>{m.name}</h1>
+    <p>{m.interface === "No prompt" || m.interface === "Text prompt" ? "Automatic (no nodule location)" : "Given the nodule location"} · {m.interface} · {m.version}</p>
+  </div></div>
+  <div class="wrap">
+    <section class="two">
+      <div>
+        <h2 style="margin-top:0">At a glance</h2>
+        <table class="tbl">
+          <tr><td style="width:36%;color:var(--muted);font-weight:600">Prompt in this study</td><td>{m.prompt}</td></tr>
+          <tr><td style="color:var(--muted);font-weight:600">Version or weights</td><td>{m.version}</td></tr>
+          <tr><td style="color:var(--muted);font-weight:600">Run as</td><td>Released weights, published preprocessing and default settings in a fixed container image; no setting tuned on any study dataset</td></tr>
+          {m.noncommercial_weights && <tr><td style="color:var(--muted);font-weight:600">Weights</td><td>Noncommercial license (masks released under a noncommercial license)</td></tr>}
+          <tr><td style="color:var(--muted);font-weight:600">All datasets pooled</td><td>{pooled.pct.toFixed(1)}% of {pooled.n} nodules segmented; median Dice {pooled.dice[0].toFixed(2)} ({pooled.dice[1].toFixed(2)}, {pooled.dice[2].toFixed(2)})</td></tr>
+          <tr><td style="color:var(--muted);font-weight:600">QIBA radiomic Δ</td><td>{f3(qiba.delta[0])} ({f3(qiba.delta[1])}, {f3(qiba.delta[2])}); criterion (−0.05): {qiba.table2_criterion}</td></tr>
+          <tr><td style="color:var(--muted);font-weight:600">RIDER-Seg volume RC</td><td>{rcTxt}</td></tr>
+        </table>
+        <p class="muted" style="font-size:.85rem;margin-top:12px">Source: {m.references.map((r, i) => <>{r.replace(/ doi:\S+$/, "")} {m.dois[i] && <a href={`https://doi.org/${m.dois[i]}`}>doi:{m.dois[i]}</a>}<br /></>)}</p>
+      </div>
+      <div>
+        <h2 style="margin-top:0">Training data</h2>
+        <p class="muted">Whether each study dataset is in the method's published training data (Table S2). Results on datasets in the training data can be optimistic.</p>
+        <div class="tgrid">
+          {Object.entries(m.training).map(([d, t]) => (
+            <div class={`tchip t-${ts(t as string)}`}><b><a href={`${base}/datasets/${d.toLowerCase()}/`}>{d}</a></b><span>{TL[ts(t as string)]}</span>{(t as string).includes("(") && <small>{(t as string).slice((t as string).indexOf("("))}</small>}</div>
+          ))}
+        </div>
+      </div>
+    </section>
+    <section>
+      <h2 style="margin-top:0">Segmentation performance</h2>
+      <p class="muted">Median Dice with the reference on segmented nodules, and the percentage of nodules segmented. ● in training data, ◐ partly, ◌ possibly, ? not disclosed.</p>
+      <Forest rows={segRows} xmin={0} xmax={1} refline={null} xlabel="Median Dice (95% CI)" labelw={200} />
+      <h3 style="margin-top:22px">By nodule size, all datasets pooled</h3>
+      <div class="sizes">
+        {sizeRows.map(({ g, x }) => (
+          <div class="card"><div class="kicker">{g}</div><b class="big">{x.pct.toFixed(1)}%</b><span class="muted">segmented ({x.n_seg} of {x.n})</span><br /><span>Median Dice {x.dice[0].toFixed(2)}</span></div>
+        ))}
+      </div>
+    </section>
+    <section>
+      <h2 style="margin-top:0">Radiomic agreement with radiologists</h2>
+      <p class="muted">Δ, the median over 107 features of the method's concordance with radiologists minus the concordance between radiologists. Negative means lower agreement than between radiologists. QIBA (bold) was the prespecified test, with a margin of −0.05 (dashed line).</p>
+      <Forest rows={radRows} xmin={-0.9} xmax={0.1} refline={-0.05} xlabel="Δ (95% CI)" labelw={240} digits={3} />
+    </section>
+    <section>
+      <h2 style="margin-top:0">Test–retest repeatability</h2>
+      <p class="muted">Δ ICC, the median over features of the method's test–retest intraclass correlation minus that of the manual contour. Months-apart pairs mix real change with measurement error.</p>
+      <Forest rows={repRows} xmin={-0.25} xmax={0.25} refline={0} xlabel="Δ ICC (95% CI)" labelw={220} digits={3} />
+    </section>
+    <section>
+      <h2 style="margin-top:0">Classification</h2>
+      <p class="muted">AUC of radiomic models built on this method's masks (malignancy in IMD-CT, DLCS24 and LUNA25-Dev; radiologist suspicion in LIDC-IDRI and LNDb), and the difference from reference masks.</p>
+      <Forest rows={clsRows} xmin={0.3} xmax={1} refline={0.5} xlabel="AUC (95% CI)" labelw={200} />
+      <Forest rows={dRows} xmin={-0.45} xmax={0.05} refline={0} xlabel="AUC minus reference masks (95% CI)" labelw={200} digits={3} />
+    </section>
+  </div>
+</Base>
+
+<style>
+  .tgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .tchip { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: .86rem; display: flex; flex-direction: column; border-left-width: 4px; }
+  .tchip span { color: var(--muted); font-size: .8rem; }
+  .tchip small { color: var(--muted); font-size: .74rem; }
+  .t-yes { border-left-color: #AB0520; } .t-partly { border-left-color: #E08996; } .t-possibly, .t-undisclosed { border-left-color: #C9A227; } .t-no { border-left-color: #7F8B5A; }
+  .sizes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  @media (max-width: 700px) { .sizes { grid-template-columns: 1fr 1fr; } }
+  .sizes .big { display: block; font-family: var(--font-head); font-size: 1.6rem; color: var(--head); }
+</style>

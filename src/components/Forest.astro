@@ -1,0 +1,38 @@
+---
+// Static forest plot (SVG): point estimate with 95% CI per row, optional reference band and line.
+interface Row { label: string; est: number | null; lo?: number | null; hi?: number | null; color?: string;
+  sub?: string; bold?: boolean; hollow?: boolean; sep?: boolean }
+interface Props { rows: Row[]; xmin?: number; xmax?: number; band?: [number, number] | null; refline?: number | null;
+  xlabel?: string; labelw?: number; digits?: number }
+const { rows, xmin = 0.3, xmax = 1.0, band = null, refline = 0.5, xlabel = "AUC (95% CI)", labelw = 190, digits = 2 } = Astro.props;
+const W = 800, rowh = 24, top = 8, right = 225, plotw = W - labelw - right;
+const H = top + rows.length * rowh + 42;
+const X = (v: number) => labelw + ((Math.max(xmin, Math.min(xmax, v)) - xmin) / (xmax - xmin)) * plotw;
+const ticks: number[] = [];
+const step = xmax - xmin > 1.2 ? 0.2 : xmax - xmin > 0.5 ? 0.1 : xmax - xmin > 0.2 ? 0.05 : 0.02;
+for (let t = Math.ceil(xmin / step) * step; t <= xmax + 1e-9; t += step) ticks.push(Math.round(t * 100) / 100);
+const f2 = (x: number) => (Math.abs(x) < 0.5 * 10 ** -digits ? 0 : x).toFixed(digits).replace("-", "−");
+---
+<svg class="forest" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Forest plot">
+  {band && <rect x={X(band[0])} y={top} width={X(band[1]) - X(band[0])} height={rows.length * rowh} fill="#e9edf2" />}
+  {ticks.map((t) => <line x1={X(t)} x2={X(t)} y1={top} y2={top + rows.length * rowh} stroke="#eef1f4" />)}
+  {refline != null && <line x1={X(refline)} x2={X(refline)} y1={top} y2={top + rows.length * rowh} stroke="#8c96a1" stroke-dasharray="3 3" />}
+  {rows.map((r, i) => {
+    const y = top + i * rowh + rowh / 2;
+    return (
+      <g>
+        {r.sep && <line x1="0" x2={W} y1={top + i * rowh} y2={top + i * rowh} stroke="#0c234b" stroke-width="1" />}
+        <text x={labelw - 10} y={y + 4} text-anchor="end" font-size="12.5" font-weight={r.bold ? 700 : 400} fill="#1a1a1a">{r.label}</text>
+        {r.est != null && r.lo != null && r.hi != null && <line x1={X(r.lo)} x2={X(r.hi)} y1={y} y2={y} stroke={r.color ?? "#0c234b"} stroke-width="2" />}
+        {r.est != null && <circle cx={X(r.est)} cy={y} r="5" fill={r.hollow ? "#fff" : (r.color ?? "#0c234b")} stroke={r.color ?? "#0c234b"} stroke-width="1.6" />}
+        <text x={W - right + 10} y={y + 4} font-size="12" fill="#545f6b" font-family="DM Sans, sans-serif">
+          {r.est == null ? "" : r.lo != null && r.hi != null ? `${f2(r.est)} (${f2(r.lo)}, ${f2(r.hi)})` : f2(r.est)}{r.sub ? ` ${r.sub}` : ""}
+        </text>
+      </g>
+    );
+  })}
+  <line x1={labelw} x2={labelw + plotw} y1={top + rows.length * rowh} y2={top + rows.length * rowh} stroke="#1a1a1a" />
+  {ticks.map((t) => <g><line x1={X(t)} x2={X(t)} y1={top + rows.length * rowh} y2={top + rows.length * rowh + 4} stroke="#1a1a1a" />
+    <text x={X(t)} y={top + rows.length * rowh + 17} font-size="11.5" text-anchor="middle" font-weight="600">{(Math.abs(t) < 1e-9 ? 0 : t).toFixed(Math.abs(Math.round(t * 100) % 10) ? 2 : 1).replace("-", "−")}</text></g>)}
+  <text x={labelw + plotw / 2} y={H - 6} font-size="12" text-anchor="middle" font-weight="700" fill="#0c234b">{xlabel}</text>
+</svg>

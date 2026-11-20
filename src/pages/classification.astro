@@ -1,0 +1,98 @@
+---
+import Base from "../layouts/Base.astro";
+---
+<Base title="Classification" active="/classification" description="Malignancy and suspicion AUC with radiomic features from eight segmentation configurations.">
+  <div class="page-head"><div class="wrap">
+    <h1>Classification</h1>
+    <p>If the masks come from a method instead of a radiologist, how much classification performance is lost? Radiomic models built on each mask source, compared with reference masks, nodule diameter, mask volume and, in DLCS24, the Lung-RADS category.</p>
+  </div></div>
+  <div class="wrap">
+    <div class="controls">
+      <label>Dataset
+        <select id="ds">
+          <option value="IMD-CT">IMD-CT: malignancy (histopathology)</option>
+          <option value="LIDC-IDRI">LIDC-IDRI: radiologist suspicion</option>
+          <option value="LNDb">LNDb: radiologist suspicion</option>
+          <option value="DLCS24" selected>DLCS24: cancer in the patient (screening)</option>
+          <option value="LUNA25-Dev">LUNA25-Dev: cancer in the patient (screening)</option>
+        </select>
+      </label>
+      <label>Show
+        <select id="metric">
+          <option value="auc" selected>AUC with radiomic features</option>
+          <option value="vol">AUC with mask volume only</option>
+          <option value="dref">AUC minus reference masks</option>
+          <option value="ddiam">AUC minus diameter</option>
+          <option value="dlr">AUC minus Lung-RADS (DLCS24)</option>
+          <option value="spec">Specificity at 90% sensitivity</option>
+        </select>
+      </label>
+    </div>
+    <div class="figbox scroll-x" id="fig"></div>
+    <p class="note" id="explain" style="margin-top:12px"></p>
+    <h2>All mask sources in this dataset</h2>
+    <div class="scroll-x"><table class="tbl" id="tab"></table></div>
+  </div>
+</Base>
+
+<style is:global>
+  .figbox { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .figbox svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+</style>
+
+<script>
+  import { getJSON, BASE, METHODS, METHOD_COLOR, ci2, ci3 } from "../scripts/lib.js";
+  import { forestSVG } from "../scripts/figs.js";
+  const [cls, methods] = await Promise.all([getJSON("classification.json"), getJSON("methods.json")]);
+  const mid = Object.fromEntries(methods.map((m) => [m.name, m.id]));
+  const st = { ds: "DLCS24", metric: "auc" };
+  const get = (src, kind) => cls.find((q) => q.dataset === st.ds && q.source === src && (!kind || q.kind === kind));
+  function render() {
+    const ref = get("Reference masks", "reference"), dia = get("Diameter", "baseline"), lr = get("Lung-RADS category", "baseline");
+    const has = { dref: !!ref, ddiam: !!dia, dlr: !!lr };
+    for (const k of Object.keys(has)) document.querySelector(`#metric [value="${k}"]`).disabled = !has[k];
+    if (has[st.metric] === false) { st.metric = "auc"; document.getElementById("metric").value = "auc"; }
+    const m = st.metric;
+    const meth = METHODS.map((x) => get(x, "method"));
+    let items, opts;
+    if (m === "auc") {
+      items = meth.map((x) => ({ name: `${x.source} (${x.n_seg}/${x.n})`, est: x.auc[0], lo: x.auc[1], hi: x.auc[2], color: METHOD_COLOR[x.source] })).sort((a, b) => b.est - a.est);
+      const comps = [ref && { name: "Reference masks", v: ref.auc, color: "#1A1A1A" }, dia && { name: "Diameter (log)", v: dia.auc, color: "#64748B" }, lr && { name: "Lung-RADS category", v: lr.auc, color: "#AB0520" }].filter(Boolean)
+        .map((c) => ({ name: c.name, est: c.v[0], lo: c.v[1], hi: c.v[2], color: c.color, comparator: true }));
+      items = [...items, ...comps];
+      opts = { axisLabel: "AUC (95% CI)", range: [0.3, 1], ref: 0.5 };
+    } else if (m === "vol") {
+      items = cls.filter((q) => q.dataset === st.ds && q.kind === "volume").map((x) => ({ name: x.source, est: x.auc[0], lo: x.auc[1], hi: x.auc[2], color: METHOD_COLOR[x.source] ?? "#1A1A1A", comparator: !METHODS.includes(x.source) })).sort((a, b) => (a.comparator - b.comparator) || b.est - a.est);
+      opts = { axisLabel: "AUC, log mask volume only (95% CI)", range: [0.3, 1], ref: 0.5 };
+    } else if (m === "spec") {
+      items = meth.filter((x) => x.spec90).map((x) => ({ name: x.source, est: x.spec90[0], lo: x.spec90[1], hi: x.spec90[2], color: METHOD_COLOR[x.source] })).sort((a, b) => b.est - a.est);
+      opts = { axisLabel: "Specificity at 90% sensitivity (95% CI)", range: [0, 1], ref: null };
+    } else {
+      const k = { dref: "d_reference", ddiam: "d_diameter", dlr: "d_lungrads" }[m];
+      items = meth.filter((x) => x[k]).map((x) => ({ name: x.source, est: x[k][0], lo: x[k][1], hi: x[k][2], color: METHOD_COLOR[x.source] })).sort((a, b) => b.est - a.est);
+      opts = { axisLabel: { dref: "AUC minus reference masks", ddiam: "AUC minus diameter", dlr: "AUC minus Lung-RADS" }[m] + " (95% CI)", range: m === "dlr" ? [-0.35, 0.05] : [-0.45, 0.25], ref: 0, digits: 3 };
+    }
+    const n = (ref ?? meth[0]);
+    document.getElementById("fig").innerHTML = forestSVG([{ task: `${st.ds} · ${n.task.toLowerCase()} · ${n.n} nodules (${n.n_pos} positive), ${n.patients} patients`, items }], opts);
+    document.getElementById("explain").textContent = {
+      auc: "L2-penalized logistic regression on 107 radiomic features from each mask source, patient-grouped stratified fivefold cross-validation repeated three times. A nodule a method did not segment was kept and given the training-fold prevalence. Brackets: nodules segmented of nodules analyzed. Diameter is a one-feature model on log diameter (not available for LUNA25-Dev); Lung-RADS is the category recorded with DLCS24, scored without a fitted model.",
+      vol: "One-feature logistic regression on log mask volume from each source.",
+      dref: "Method AUC minus the AUC with reference masks on the same nodules, with 95% CIs from a patient-level bootstrap.",
+      ddiam: "Method AUC minus the AUC of the log diameter model.",
+      dlr: "Method AUC minus the AUC of the recorded Lung-RADS category (DLCS24).",
+      spec: "Specificity when the decision threshold is set to reach 90% sensitivity.",
+    }[m] + (["DLCS24", "LUNA25-Dev"].includes(st.ds) ? " In DLCS24 and LUNA25-Dev, labels are assigned to the patient: every nodule of a patient with cancer is labeled malignant." : "") + (st.ds === "LIDC-IDRI" || st.ds === "LNDb" ? " Suspicion labels came from the same radiologists who drew the reference outlines." : "");
+    let t = `<thead><tr><th>Mask source or baseline</th><th>Segmented</th><th>AUC (95% CI)</th><th>Minus reference</th><th>Minus diameter</th>${lr ? "<th>Minus Lung-RADS</th>" : ""}<th>Specificity at 90% sensitivity</th></tr></thead><tbody>`;
+    const rowsT = [ref, ...meth, dia, lr].filter(Boolean);
+    rowsT.forEach((x) => {
+      const isM = x.kind === "method";
+      t += `<tr><td>${isM ? `<a href="${BASE}/methods/${mid[x.source]}/"><b>${x.source}</b></a>` : `<i>${x.source}</i>`}</td><td class="num">${isM ? `${x.n_seg}/${x.n}` : ""}</td><td class="num">${ci2(x.auc)}</td>
+        <td class="num">${x.d_reference ? ci3(x.d_reference) : ""}</td><td class="num">${x.d_diameter ? ci3(x.d_diameter) : ""}</td>${lr ? `<td class="num">${x.d_lungrads ? ci3(x.d_lungrads) : ""}</td>` : ""}
+        <td class="num">${x.spec90 ? ci2(x.spec90) : ""}</td></tr>`;
+    });
+    document.getElementById("tab").innerHTML = t + "</tbody>";
+  }
+  document.getElementById("ds").onchange = (e) => { st.ds = e.target.value; render(); };
+  document.getElementById("metric").onchange = (e) => { st.metric = e.target.value; render(); };
+  render();
+</script>

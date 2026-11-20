@@ -1,0 +1,248 @@
+---
+import Base from "../layouts/Base.astro";
+import meta from "../data/meta.json";
+---
+<Base title="Network" active="/network" description="Graph of segmentation methods, CT datasets and analyses, linked by training data and performance.">
+  <div class="page-head"><div class="wrap">
+    <h1>Network</h1>
+    <p>How the methods, datasets and analyses connect. Red links show which datasets were in a method's training data; blue links show which methods perform best in each dataset. Select a node for details.</p>
+  </div></div>
+  <div class="wrap">
+    <div class="netstats">
+      <div><span>Configurations</span><b>{meta.configurations}</b></div>
+      <div><span>Datasets</span><b>{meta.datasets}</b></div>
+      <div><span>Analyses</span><b>4</b></div>
+      <div><span>Links shown</span><b id="nlinks">–</b></div>
+    </div>
+    <div class="netgrid">
+      <div class="netcard">
+        <label class="lab" for="q">Search the network</label>
+        <input id="q" type="search" placeholder="Method or dataset name (at least 2 letters)" autocomplete="off" />
+        <div class="controls" style="margin:14px 0 10px">
+          <label>Performance links
+            <select id="perf">
+              <option value="top3" selected>Three highest median Dice in each dataset</option>
+              <option value="cov">At least 90% of nodules segmented</option>
+              <option value="delta">Radiomic Δ 95% CI reaching −0.05 or above</option>
+              <option value="none">None</option>
+            </select>
+          </label>
+          <label>Layout
+            <div class="seg" id="layout"><button data-v="force" class="on">Force</button><button data-v="cols">Columns</button></div>
+          </label>
+          <label>Show
+            <span class="checks">
+              <label><input type="checkbox" id="sTrain" checked /> Training data</label>
+              <label><input type="checkbox" id="sUnd" /> Undisclosed</label>
+              <label><input type="checkbox" id="sAn" checked /> Analyses</label>
+            </span>
+          </label>
+        </div>
+        <div class="legend" id="legend"></div>
+        <p class="muted" style="font-size:.84rem;margin:2px 0 8px" id="caption"></p>
+        <div class="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zreset">Reset</button></div>
+        <svg id="net" role="img" aria-label="Network of methods, datasets and analyses"></svg>
+      </div>
+      <aside class="netcard side" id="side">
+        <h3 style="margin-top:0">Details</h3>
+        <p class="muted">Select a node in the graph, or search, to see its links: a method's training data and results, a dataset's best methods, or an analysis and its datasets.</p>
+      </aside>
+    </div>
+    <p class="note" style="margin-top:16px">Training data from Table S2 of the article: Yes = the dataset or its parent collection is listed in the method's published training data; Partly = only some patients; Undisclosed = the training data are not fully published (MedSAM2 and TotalSegmentator); Possibly = not listed, but the developers released MedSAM2 masks for this dataset. Results on datasets in a method's training data can be optimistic.</p>
+  </div>
+</Base>
+
+<style is:global>
+  .netstats { display: flex; gap: 40px; flex-wrap: wrap; justify-content: center; margin: 22px 0 18px; }
+  .netstats div span { display: block; font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .netstats div b { font-family: var(--font-head); font-size: 1.9rem; color: var(--head); font-variant-numeric: tabular-nums; }
+  .netgrid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+  @media (max-width: 1000px) { .netgrid { grid-template-columns: 1fr; } }
+  .netcard { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; box-shadow: var(--shadow); }
+  .netcard .lab { display: block; font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--head); margin-bottom: 6px; }
+  .netcard input[type="search"] { width: 100%; min-width: 0; padding: 10px 12px; font-size: .95rem; }
+  .side { position: sticky; top: 84px; max-height: calc(100vh - 100px); overflow: auto; }
+  .side .row { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: .88rem; }
+  .side .row span:last-child { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .side h4 { font-family: var(--font); font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 16px 0 4px; }
+  .side .box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 12px; }
+  .checks { display: flex; gap: 14px; flex-wrap: wrap; padding-top: 6px; }
+  .checks label { flex-direction: row !important; align-items: center; gap: 6px !important; font-size: .88rem !important; text-transform: none !important; letter-spacing: 0 !important; color: var(--ink) !important; font-weight: 500 !important; }
+  .zoom { display: flex; justify-content: flex-end; gap: 6px; }
+  .zoom button { font: inherit; font-size: .85rem; font-weight: 700; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; padding: 4px 12px; cursor: pointer; color: var(--head); }
+  .zoom button:hover { border-color: var(--az-red); color: var(--az-red); }
+  #net { width: 100%; height: 680px; display: block; cursor: grab; touch-action: none; }
+  #net text { font-family: var(--font); pointer-events: none; paint-order: stroke; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; }
+  #net .node { cursor: pointer; }
+  #net .dim { opacity: .12; }
+  .lg-sym { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; }
+</style>
+
+<script>
+  import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY } from "d3-force";
+  import { select } from "d3-selection";
+  import { zoom, zoomIdentity } from "d3-zoom";
+  import { drag } from "d3-drag";
+  import { getJSON, ci2, ci3, BASE, tooltip, METHODS, INTERFACE_COLOR, SEG_DS, trainStatus, TRAIN_LABEL } from "../scripts/lib.js";
+
+  const tip = tooltip();
+  const [methods, datasets, seg, radio, cls] = await Promise.all([getJSON("methods.json"), getJSON("datasets.json"), getJSON("segmentation.json"), getJSON("radiomics.json"), getJSON("classification.json")]);
+  const AN = { seg: "Segmentation performance", radiomics: "Radiomic similarity", repeat: "Test–retest repeatability", cls: "Classification" };
+  const C = { ds: "#E5EFF7", dsStroke: "#1E5288", an: "#7F8B5A", perf: "#106AB1", yes: "#AB0520", und: "#C9A227", struct: "#B8C2CE" };
+  const nodes = [];
+  Object.entries(AN).forEach(([k, v]) => nodes.push({ id: `an:${k}`, kind: "an", name: v, label: v }));
+  methods.forEach((m) => nodes.push({ id: `m:${m.name}`, kind: "m", name: m.name, label: m.name, m, color: INTERFACE_COLOR[m.interface] }));
+  datasets.forEach((d) => nodes.push({ id: `d:${d.name}`, kind: "d", name: d.name, label: d.name, d, nod: +d.table1["No. of nodules"] }));
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const anLinks = datasets.flatMap((d) => d.analyses.map((a) => ({ source: `d:${d.name}`, target: `an:${a}`, kind: "an" })));
+  const trLinks = methods.flatMap((m) => Object.entries(m.training).map(([d, t]) => ({ source: `m:${m.name}`, target: `d:${d}`, kind: trainStatus(t), text: t }))).filter((l) => l.kind !== "no");
+  const segRow = (d, m) => seg.by_dataset.find((q) => q.dataset === d && q.method === m);
+  function perfLinks(mode) {
+    if (mode === "none") return [];
+    const out = [];
+    SEG_DS.forEach((d) => {
+      const rows = METHODS.map((m) => ({ m, x: segRow(d, m) })).filter((r) => r.x);
+      let keep;
+      if (mode === "top3") keep = rows.filter((r) => r.x.pct >= 80).sort((a, b) => b.x.dice[0] - a.x.dice[0]).slice(0, 3);
+      else if (mode === "cov") keep = rows.filter((r) => r.x.pct >= 90);
+      else keep = rows.filter((r) => { const q = radio.summary.find((z) => z.dataset === d && z.method === r.m && z.set === "all lesions"); return q && q.delta && q.delta[2] >= -0.05; });
+      keep.forEach((r) => out.push({ source: `m:${r.m}`, target: `d:${d}`, kind: "perf", w: r.x.dice[0] }));
+    });
+    return out;
+  }
+  const svg = select("#net"), W = () => svg.node().clientWidth, H = 680;
+  const root = svg.append("g"), gL = root.append("g"), gN = root.append("g"), gT = root.append("g");
+  const zb = zoom().scaleExtent([0.3, 4]).on("zoom", (e) => root.attr("transform", e.transform));
+  svg.call(zb).on("dblclick.zoom", null);
+  const st = { perf: "top3", layout: "force", train: true, und: false, an: true, sel: null };
+  let links = [], sim;
+  const radius = (n) => n.kind === "m" ? 8 + 1.6 * (n.deg || 0) : n.kind === "d" ? 6 + 1.8 * Math.log10(n.nod) : 10;
+  function shape(n) {
+    const r = radius(n);
+    if (n.kind === "m") return `M${-r},0a${r},${r} 0 1,0 ${2 * r},0a${r},${r} 0 1,0 ${-2 * r},0`;
+    if (n.kind === "an") return `M0,${-r * 1.3}L${r * 1.3},0L0,${r * 1.3}L${-r * 1.3},0z`;
+    const a = r * 1.15, b = r * 0.95;
+    return `M${-a},0L${-a / 2},${-b}L${a / 2},${-b}L${a},0L${a / 2},${b}L${-a / 2},${b}z`;
+  }
+  const fill = (n) => n.kind === "m" ? n.color : n.kind === "an" ? C.an : n.d.has_reference ? C.ds : "#fff";
+  const stroke = (n) => n.kind === "d" ? C.dsStroke : "#fff";
+  function colTargets() {
+    const w = W(), pad = 60;
+    const col = (list, x) => list.forEach((n, i) => { n.tx = x; n.ty = pad + (i + 0.5) * (H - 2 * pad) / list.length; });
+    const IF = ["Point", "Point and box", "Text prompt", "No prompt"];
+    col(nodes.filter((n) => n.kind === "m").sort((a, b) => IF.indexOf(a.m.interface) - IF.indexOf(b.m.interface)), w * 0.18);
+    col(nodes.filter((n) => n.kind === "d"), w * 0.55);
+    col(nodes.filter((n) => n.kind === "an"), w * 0.88);
+  }
+  function fit() {
+    const w = W(), xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
+    const x0 = Math.min(...xs) - 100, x1 = Math.max(...xs) + 100, y0 = Math.min(...ys) - 30, y1 = Math.max(...ys) + 40;
+    const k = Math.min(1.6, w / (x1 - x0), H / (y1 - y0));
+    svg.call(zb.transform, zoomIdentity.translate((w - k * (x0 + x1)) / 2, (H - k * (y0 + y1)) / 2).scale(k));
+  }
+  document.getElementById("zin").onclick = () => svg.call(zb.scaleBy, 1.3);
+  document.getElementById("zout").onclick = () => svg.call(zb.scaleBy, 1 / 1.3);
+  document.getElementById("zreset").onclick = () => { fit(); select_(null); };
+  function build() {
+    const perf = perfLinks(st.perf);
+    nodes.forEach((n) => (n.deg = 0));
+    perf.forEach((l) => byId.get(l.source).deg++);
+    links = [...(st.an ? anLinks : []), ...(st.train ? trLinks.filter((l) => ["yes", "partly"].includes(l.kind)) : []), ...(st.und ? trLinks.filter((l) => ["undisclosed", "possibly"].includes(l.kind)) : []), ...perf].map((l) => ({ ...l }));
+    document.getElementById("nlinks").textContent = links.length;
+    const ls = gL.selectAll("line").data(links).join("line")
+      .attr("stroke", (l) => l.kind === "perf" ? C.perf : l.kind === "yes" || l.kind === "partly" ? C.yes : l.kind === "an" ? C.struct : C.und)
+      .attr("stroke-width", (l) => l.kind === "perf" ? 1 + 8 * Math.max(0, l.w - 0.5) : l.kind === "yes" ? 2.2 : 1.5)
+      .attr("stroke-dasharray", (l) => l.kind === "partly" ? "6 4" : l.kind === "undisclosed" || l.kind === "possibly" ? "2 3" : null)
+      .attr("stroke-opacity", (l) => l.kind === "perf" ? 0.55 : 0.9);
+    const ns = gN.selectAll("path").data(nodes, (n) => n.id).join("path").attr("class", "node").attr("d", shape).attr("fill", fill).attr("stroke", stroke).attr("stroke-width", 1.6);
+    const ts = gT.selectAll("text").data(nodes, (n) => n.id).join("text").text((n) => n.label).attr("font-size", (n) => n.kind === "an" ? 12 : 11.5)
+      .attr("font-weight", (n) => n.kind === "m" ? 700 : 600).attr("fill", (n) => n.kind === "an" ? "#4c5634" : "#0f172a")
+      .attr("text-anchor", (n) => st.layout === "cols" ? (n.kind === "m" ? "end" : "start") : "middle");
+    ns.on("mousemove", (ev, n) => tip.show(`<b>${n.name}</b><br><span style="opacity:.8">${n.kind === "m" ? `${n.m.interface} · ${n.m.version}` : n.kind === "d" ? `${n.d.table1["No. of nodules"]} nodules · ${n.d.full_name}` : "Analysis"}</span>`, ev))
+      .on("mouseleave", () => tip.hide()).on("click", (ev, n) => { ev.stopPropagation(); select_(n); });
+    svg.on("click", () => select_(null));
+    ns.call(drag().on("start", (e, n) => { if (!e.active) sim.alphaTarget(0.2).restart(); n.fx = n.x; n.fy = n.y; })
+      .on("drag", (e, n) => { n.fx = e.x; n.fy = e.y; }).on("end", (e, n) => { if (!e.active) sim.alphaTarget(0); if (st.layout === "force") { n.fx = null; n.fy = null; } }));
+    if (sim) sim.stop();
+    const w = W();
+    if (st.layout === "cols") colTargets();
+    sim = forceSimulation(nodes)
+      .force("link", forceLink(links).id((n) => n.id).distance((l) => l.kind === "an" ? 90 : 120).strength(st.layout === "cols" ? 0 : (l) => l.kind === "perf" ? 0.3 : 0.25))
+      .force("charge", forceManyBody().strength(st.layout === "cols" ? 0 : -1100).distanceMax(600))
+      .force("collide", forceCollide().radius((n) => radius(n) + (st.layout === "cols" ? 2 : 34)))
+      .force("x", forceX((n) => st.layout === "cols" ? n.tx : w / 2).strength(st.layout === "cols" ? 1 : 0.04))
+      .force("y", forceY((n) => st.layout === "cols" ? n.ty : H / 2).strength(st.layout === "cols" ? 1 : 0.06))
+      .on("tick", () => {
+        ls.attr("x1", (l) => l.source.x).attr("y1", (l) => l.source.y).attr("x2", (l) => l.target.x).attr("y2", (l) => l.target.y);
+        ns.attr("transform", (n) => `translate(${n.x},${n.y})`);
+        ts.attr("x", (n) => st.layout === "cols" ? n.x + (n.kind === "m" ? -radius(n) - 6 : radius(n) + 6) : n.x).attr("y", (n) => st.layout === "cols" ? n.y + 4 : n.y + radius(n) + 13);
+      });
+    sim.on("end", fit);
+    if (st.layout === "force") sim.alpha(1).restart();
+    highlight(); caption();
+  }
+  function neighbors(n) { const s = new Set([n.id]); links.forEach((l) => { if (l.source.id === n.id) s.add(l.target.id); if (l.target.id === n.id) s.add(l.source.id); }); return s; }
+  function highlight(match) {
+    const sel = st.sel, keep = sel ? neighbors(sel) : match ? new Set(match.map((n) => n.id)) : null;
+    gN.selectAll("path").classed("dim", (n) => keep && !keep.has(n.id)).attr("stroke", (n) => sel && n.id === sel.id ? "#AB0520" : stroke(n)).attr("stroke-width", (n) => sel && n.id === sel.id ? 3.5 : 1.6);
+    gT.selectAll("text").classed("dim", (n) => keep && !keep.has(n.id));
+    gL.selectAll("line").classed("dim", (l) => keep && !(keep.has(l.source.id) && keep.has(l.target.id) && (!sel || l.source.id === sel.id || l.target.id === sel.id)));
+  }
+  const f2 = (x) => x.toFixed(2);
+  function select_(n) {
+    st.sel = n; highlight();
+    const side = document.getElementById("side");
+    if (!n) { side.innerHTML = `<h3 style="margin-top:0">Details</h3><p class="muted">Select a node in the graph, or search, to see its links.</p>`; return; }
+    const un = `<button class="mini" id="unsel" style="float:right;border:1px solid #cbd5e1;border-radius:6px;padding:3px 9px;color:var(--head)">Unselect</button>`;
+    let h = `${un}<div style="font-size:.74rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--az-red)">${{ m: "Method", d: "Dataset", an: "Analysis" }[n.kind]}</div>`;
+    if (n.kind === "m") {
+      const m = n.m;
+      h += `<h3 style="margin:.2em 0 .3em">${m.name}</h3><p class="muted" style="font-size:.86rem;margin:0">${m.interface} · ${m.version}<br>Prompt: ${m.prompt}</p>
+        <h4>Median Dice (% segmented)</h4>${SEG_DS.map((d) => { const x = segRow(d, m.name); return `<div class="row"><span>${d}</span><span>${f2(x.dice[0])} (${x.pct.toFixed(0)}%)</span></div>`; }).join("")}
+        <h4>Training data</h4>${Object.entries(m.training).map(([d, t]) => `<div class="row"><span>${d}</span><span class="muted">${TRAIN_LABEL[trainStatus(t)]}</span></div>`).join("")}
+        <p><a href="${BASE}/methods/${m.id}/">Open the method page →</a></p>`;
+    } else if (n.kind === "d") {
+      const d = n.d;
+      const rows = METHODS.map((m) => ({ m, x: segRow(d.name, m) })).filter((r) => r.x).sort((a, b) => b.x.dice[0] - a.x.dice[0]);
+      const ir = seg.by_dataset.find((q) => q.dataset === d.name && q.method === "Inter-reader agreement");
+      h += `<h3 style="margin:.2em 0 .3em">${d.name}</h3><p class="muted" style="font-size:.86rem;margin:0">${d.full_name}<br>${d.table1["No. of nodules"]} nodules · ${d.table1["No. of patients"]} patients${d.reference_standard ? `<br>Reference: ${d.reference_standard}` : ""}</p>
+        ${rows.length ? `<h4>Methods by median Dice</h4>${ir ? `<div class="row"><span><i>Inter-reader</i></span><span>${f2(ir.dice[0])}</span></div>` : ""}${rows.map((r) => `<div class="row"><span>${r.m}</span><span>${f2(r.x.dice[0])} (${r.x.pct.toFixed(0)}%)</span></div>`).join("")}` : ""}
+        <div class="box"><b>In training data of</b><br>${methods.filter((m) => ["yes", "partly"].includes(trainStatus(m.training[d.name]))).map((m) => `${m.name} (${m.training[d.name]})`).join("<br>") || "none with disclosed training data"}</div>
+        <p><a href="${BASE}/datasets/${d.id}/">Open the dataset page →</a></p>`;
+    } else {
+      const k = n.id.slice(3);
+      h += `<h3 style="margin:.2em 0 .3em">${n.name}</h3><h4>Datasets</h4>${datasets.filter((d) => d.analyses.includes(k)).map((d) => `<div class="row"><span><a href="${BASE}/datasets/${d.id}/">${d.name}</a></span><span>${d.table1["No. of nodules"]} nodules</span></div>`).join("")}
+        <p><a href="${BASE}/${{ seg: "explorer", radiomics: "features", repeat: "repeatability", cls: "classification" }[k]}/">Open the results →</a></p>`;
+    }
+    side.innerHTML = h;
+    document.getElementById("unsel").onclick = () => select_(null);
+  }
+  function caption() {
+    document.getElementById("caption").textContent = ({ top3: "Blue links join each dataset with reference segmentations to the three methods with the highest median Dice among those segmenting at least 80% of its nodules.", cov: "Blue links join a dataset to each method that segmented at least 90% of its nodules.", delta: "Blue links join a dataset to each method whose radiomic Δ upper 95% bound reaches −0.05 or above (multireader datasets).", none: "No performance links." })[st.perf] + " Thicker links mean higher Dice. Larger circles have more performance links; larger hexagons hold more nodules.";
+  }
+  const sym = (d, f, s, dash) => `<svg width="16" height="16" viewBox="-8 -8 16 16"><path d="${d}" fill="${f}" stroke="${s}" stroke-width="1.4" ${dash ? 'stroke-dasharray="3 2"' : ""}/></svg>`;
+  const circ = "M-6,0a6,6 0 1,0 12,0a6,6 0 1,0 -12,0";
+  const ln = (c, w, dash) => `<svg width="26" height="10"><line x1="0" y1="5" x2="26" y2="5" stroke="${c}" stroke-width="${w}" ${dash ? `stroke-dasharray="${dash}"` : ""}/></svg>`;
+  document.getElementById("legend").innerHTML = Object.entries(INTERFACE_COLOR).map(([k, v]) => `<span class="lg-sym">${sym(circ, v, v)}${k}</span>`).join("") +
+    `<span class="lg-sym">${sym("M-7,0L-3.5,-6L3.5,-6L7,0L3.5,6L-3.5,6z", C.ds, C.dsStroke)}Dataset with reference</span><span class="lg-sym">${sym("M-7,0L-3.5,-6L3.5,-6L7,0L3.5,6L-3.5,6z", "#fff", C.dsStroke)}Labels only</span>` +
+    `<span class="lg-sym">${sym("M0,-7L7,0L0,7L-7,0z", C.an, C.an)}Analysis</span><span class="lg-sym">${ln(C.perf, 3)}Performance</span><span class="lg-sym">${ln(C.yes, 2.2)}In training data</span><span class="lg-sym">${ln(C.yes, 1.5, "6 4")}Partly</span><span class="lg-sym">${ln(C.und, 1.5, "2 3")}Undisclosed or possibly</span>`;
+  document.getElementById("perf").onchange = (e) => { st.perf = e.target.value; build(); };
+  document.getElementById("sTrain").onchange = (e) => { st.train = e.target.checked; build(); };
+  document.getElementById("sUnd").onchange = (e) => { st.und = e.target.checked; build(); };
+  document.getElementById("sAn").onchange = (e) => { st.an = e.target.checked; build(); };
+  document.getElementById("layout").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    [...b.parentNode.children].forEach((x) => x.classList.toggle("on", x === b));
+    st.layout = b.dataset.v; nodes.forEach((n) => { n.fx = null; n.fy = null; }); build();
+    if (st.layout === "cols") { sim.alpha(1); for (let i = 0; i < 200; i++) sim.tick(); sim.stop(); sim.on("tick")(); svg.call(zb.transform, zoomIdentity); }
+  });
+  document.getElementById("q").addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    if (q.length < 2) { st.sel = null; highlight(); return; }
+    const hits = nodes.filter((n) => n.label.toLowerCase().includes(q));
+    if (hits.length === 1) select_(hits[0]); else { st.sel = null; highlight(hits); }
+  });
+  build();
+  const pre = new URLSearchParams(location.search).get("select");
+  if (pre && byId.get(pre)) setTimeout(() => select_(byId.get(pre)), 300);
+</script>

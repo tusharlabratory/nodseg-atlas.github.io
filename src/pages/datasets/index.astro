@@ -1,0 +1,32 @@
+---
+import Base from "../../layouts/Base.astro";
+import datasets from "../../data/datasets.json";
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const AN: Record<string, string> = { seg: "Segmentation", radiomics: "Radiomics", repeat: "Repeatability", cls: "Classification" };
+const groups = [["With reference segmentations", datasets.filter((d) => d.has_reference)], ["Nodule locations and malignancy labels only", datasets.filter((d) => !d.has_reference)]] as const;
+---
+<Base title="Datasets" active="/datasets" description="Ten open-access CT datasets used to evaluate lung nodule segmentation methods.">
+  <div class="page-head"><div class="wrap">
+    <h1>Datasets</h1>
+    <p>Ten open-access public CT datasets. Reference segmentations were used as released, without rereading. Shared patients are counted once in the totals: all RIDER-Seg patients are QIBA patients, and three tumors are in both QIN and LUAD-Surv.</p>
+  </div></div>
+  <div class="wrap">
+    {groups.map(([t, ds]) => (
+      <section>
+        <h2 style="margin-top:0">{t}</h2>
+        <div class="grid">
+          {ds.map((d) => (
+            <a class="card" href={`${base}/datasets/${d.id}/`}>
+              <div class="kicker">{(d.table1 as any)["Country (no. of centers)"]}</div>
+              <h3>{d.name}</h3>
+              <p class="muted" style="font-size:.85rem;margin:0 0 8px">{d.full_name}</p>
+              <p style="margin:0 0 8px;font-size:.9rem"><b>{(d.table1 as any)["No. of nodules"]}</b> nodules · <b>{(d.table1 as any)["No. of patients"]}</b> patients</p>
+              {d.reference_standard && <p class="muted" style="font-size:.82rem;margin:0 0 8px">Reference: {d.reference_standard}</p>}
+              <div>{d.analyses.map((a) => <span class="pill">{AN[a]}</span>)}</div>
+            </a>
+          ))}
+        </div>
+      </section>
+    ))}
+  </div>
+</Base>

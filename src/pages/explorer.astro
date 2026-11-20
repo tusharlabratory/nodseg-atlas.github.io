@@ -1,0 +1,159 @@
+---
+import Base from "../layouts/Base.astro";
+---
+<Base title="Explorer" active="/explorer" description="Heat map of eight lung nodule segmentation configurations across 10 CT datasets.">
+  <div class="page-head"><div class="wrap">
+    <h1>Explorer</h1>
+    <p>Every configuration in every dataset. Switch the metric; hover a cell for the 95% CI and the training-data status; click a name to open its page.</p>
+  </div></div>
+  <div class="wrap">
+    <div class="controls">
+      <label>Show
+        <select id="metric">
+          <optgroup label="Segmentation performance">
+            <option value="pct">Nodules segmented (%)</option>
+            <option value="dice" selected>Median Dice (segmented nodules)</option>
+            <option value="vol">Volume ratio, method / reference</option>
+            <option value="hd95">HD95 (mm)</option>
+          </optgroup>
+          <optgroup label="Radiomic similarity">
+            <option value="delta">Δ vs inter-reader, or median CCC</option>
+          </optgroup>
+          <optgroup label="Classification">
+            <option value="auc">AUC</option>
+            <option value="dauc">AUC minus reference masks</option>
+            <option value="spec">Specificity at 90% sensitivity</option>
+          </optgroup>
+        </select>
+      </label>
+      <label id="colslab">Columns
+        <div class="seg" id="cols"><button data-v="ds" class="on">Datasets</button><button data-v="size">Nodule size (pooled)</button></div>
+      </label>
+      <label>Values
+        <div class="seg" id="vals"><button data-v="on" class="on">Show</button><button data-v="off">Hide</button></div>
+      </label>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div class="scroll-x"><table class="heat" id="heat"></table></div>
+    <p class="note" id="explain" style="margin-top:14px"></p>
+  </div>
+</Base>
+
+<style is:global>
+  .heat td { position: relative; width: 62px; }
+  .heat td .tm { position: absolute; top: 1px; right: 3px; font-size: .62rem; opacity: .85; }
+  .heat th.col { height: 120px; }
+</style>
+
+<script>
+  import { getJSON, seqColor, divColor, inkFor, f2, f3s, ci2, ci3, tooltip, BASE, METHODS, SEG_DS, CLS_DS, trainStatus, TRAIN_LABEL, TRAIN_MARK, BLUES, REDS, NEUTRAL } from "../scripts/lib.js";
+  const tip = tooltip();
+  const [seg, radio, cls, methods] = await Promise.all([getJSON("segmentation.json"), getJSON("radiomics.json"), getJSON("classification.json"), getJSON("methods.json")]);
+  const st = { metric: "dice", cols: "ds", vals: true };
+  const mid = Object.fromEntries(methods.map((m) => [m.name, m.id]));
+  const train = Object.fromEntries(methods.map((m) => [m.name, m.training]));
+  const SIZES = ["≤8 mm", ">8–20 mm", ">20–30 mm", ">30 mm", "All nodules"];
+  const MULTI = ["QIBA", "LIDC-IDRI", "LNDb", "QIN"];
+  const REDSEQ = (v) => { const t = Math.min(1, v); const c = [[255, 255, 255], [247, 227, 230], [224, 137, 150], [171, 5, 32]]; const k = Math.min(2, Math.floor(t * 3)); const u = t * 3 - k; const a = c[k], b = c[k + 1]; return `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * u)).join(",")})`; };
+
+  function cell(row, col) {
+    const m = st.metric;
+    if (["pct", "dice", "vol", "hd95"].includes(m)) {
+      const x = st.cols === "size" ? seg.pooled.find((q) => q.group === col && q.method === row) : seg.by_dataset.find((q) => q.dataset === col && q.method === row);
+      if (!x) return null;
+      if (m === "pct") return x.pct == null ? null : { v: x.pct, ci: x.pct_ci ?? (x.miss_ci ? [100 - x.miss_ci[1], 100 - x.miss_ci[0]] : null), n: `${x.n_seg} of ${x.n}` };
+      if (m === "dice") return { v: x.dice[0], ci: x.dice.slice(1), n: x.n_seg != null ? `${x.n_seg} segmented` : `${x.n} nodules` };
+      if (st.cols === "size") return null;
+      if (m === "vol") return x.vol_ratio?.[0] == null ? null : { v: x.vol_ratio[0], ci: x.vol_ratio.slice(1), n: `${x.n_seg} segmented` };
+      return x.hd95?.[0] == null ? null : { v: x.hd95[0], ci: x.hd95.slice(1), n: `${x.n_seg} segmented` };
+    }
+    if (m === "delta") {
+      const set = col === "QIBA" && row === "VoxTell" ? "prespecified VoxTell set (8 unseen patients)" : "all lesions";
+      const x = radio.summary.find((q) => q.dataset === col && q.method === row && q.set === set);
+      if (!x) return null;
+      if (MULTI.includes(col) && x.delta) return { v: x.delta[0], ci: x.delta.slice(1), n: `${x.n_seg} of ${x.n} segmented`, kind: "delta", note: set !== "all lesions" ? "prespecified set: 20 nodules in 8 patients outside its training data" : "" };
+      return { v: x.median_ccc[0], ci: x.median_ccc.slice(1), n: `${x.n_seg} of ${x.n} segmented`, kind: "ccc" };
+    }
+    const x = cls.find((q) => q.dataset === col && q.source === row);
+    if (!x) return null;
+    if (m === "auc") return { v: x.auc[0], ci: x.auc.slice(1), n: x.kind === "method" ? `${x.n_seg} of ${x.n} segmented` : `${x.n} nodules` };
+    if (m === "dauc") return x.d_reference ? { v: x.d_reference[0], ci: x.d_reference.slice(1), n: `${x.n_seg} of ${x.n} segmented` } : null;
+    return x.spec90 ? { v: x.spec90[0], ci: x.spec90.slice(1), n: `${x.n_seg} of ${x.n} segmented` } : null;
+  }
+  function color(c, col) {
+    const m = st.metric;
+    if (m === "pct") return seqColor(c.v, 0, 100);
+    if (m === "dice" || m === "spec") return seqColor(c.v, 0, 1);
+    if (m === "auc") return seqColor(c.v, 0.4, 0.9);
+    if (m === "dauc") return divColor(c.v);
+    if (m === "delta") return c.kind === "delta" ? divColor(c.v) : seqColor(c.v, 0, 1);
+    if (m === "vol") return REDSEQ(Math.abs(Math.log2(c.v)) / 3);
+    return REDSEQ(c.v / 20);
+  }
+  const fmt = (c) => { const m = st.metric; if (m === "pct") return c.v.toFixed(0); if (m === "vol" || m === "hd95") return c.v >= 100 ? c.v.toFixed(0) : c.v.toFixed(c.v >= 10 ? 0 : 1); if (m === "dauc" || (m === "delta" && c.kind === "delta")) return f3s(c.v).replace("0.", "."); return f2(c.v).replace("0.", "."); };
+
+  function render() {
+    const m = st.metric, sizeOK = ["pct", "dice"].includes(m);
+    document.getElementById("colslab").style.display = sizeOK ? "" : "none";
+    if (!sizeOK) st.cols = "ds";
+    const isCls = ["auc", "dauc", "spec"].includes(m);
+    const cols = st.cols === "size" ? SIZES : isCls ? CLS_DS : SEG_DS;
+    let rows = [...METHODS];
+    if (["pct", "dice"].includes(m) && m === "dice") rows = ["Inter-reader agreement", ...rows];
+    if (m === "dice" && st.cols === "ds") rows.push("Algorithm agreement (QIN)");
+    if (m === "auc") rows = ["Reference masks", ...rows, "Diameter", "Lung-RADS category"];
+    if (m === "spec") rows = [...rows];
+    let h = "<thead><tr><th></th>" + cols.map((c) => `<th class="col">${st.cols === "size" ? c : `<a href="${BASE}/datasets/${c.toLowerCase()}/">${c}</a>`}</th>`).join("") + "</tr></thead><tbody>";
+    rows.forEach((r, i) => {
+      const isM = METHODS.includes(r);
+      const sep = (i > 0 && isM && !METHODS.includes(rows[i - 1])) || (i > 0 && !isM && METHODS.includes(rows[i - 1]));
+      h += `<tr class="${sep ? "sep" : ""}"><th class="row">${isM ? `<a href="${BASE}/methods/${mid[r]}/">${r}</a>` : `<i>${r}</i>`}</th>`;
+      cols.forEach((col) => {
+        const c = cell(r, col);
+        if (!c || c.v == null) { h += `<td class="na">–</td>`; return; }
+        const bg = color(c, col);
+        const ts = isM && st.cols === "ds" ? trainStatus(train[r][col]) : "no";
+        h += `<td style="background:${bg};color:${inkFor(bg)}" data-r="${r}" data-c="${col}">${st.vals ? fmt(c) : ""}${TRAIN_MARK[ts] ? `<span class="tm">${TRAIN_MARK[ts]}</span>` : ""}</td>`;
+      });
+      h += "</tr>";
+    });
+    document.getElementById("heat").innerHTML = h + "</tbody>";
+    const lg = document.getElementById("legend");
+    const ramp = (lo, hi, lab) => `<span>${lab}</span><span class="ramp">${[0, 0.25, 0.5, 0.75, 1].map((t) => `<i style="background:${seqColor(lo + t * (hi - lo), lo, hi)}"></i>`).join("")}</span><span>${lo} → ${hi}</span>`;
+    const div = `<span>Lower</span><span class="ramp">${[...REDS].reverse().map((c) => `<i style="background:${c}"></i>`).join("")}<i style="background:${NEUTRAL}"></i>${BLUES.map((c) => `<i style="background:${c}"></i>`).join("")}</span><span>Higher</span>`;
+    const marks = st.cols === "ds" ? `<span style="margin-left:14px">● in training data · ◐ partly · ◌ possibly · ? training data not disclosed (Table S2)</span>` : "";
+    lg.innerHTML = ({ pct: ramp(0, 100, "%"), dice: ramp(0, 1, "Dice"), spec: ramp(0, 1, "Specificity"), auc: ramp(0.4, 0.9, "AUC"), dauc: div, delta: div + `<span style="margin-left:10px">(single-reference datasets: median CCC, ${ramp(0, 1, "").replace("<span></span>", "")})</span>`, vol: `<span>Darker red = further from 1 (log scale)</span>`, hd95: `<span>Darker red = larger HD95</span>` })[m] + marks;
+    const ex = {
+      pct: "Percentage of nodules for which the method returned a mask with a component within 5 mm of the annotated center, regardless of accuracy. For methods given no location, this shows whether a known nodule was found; it does not measure detection.",
+      dice: "Median Dice similarity coefficient with the reference, on nodules the method segmented. Inter-reader agreement is the median pairwise Dice between radiologists; in QIN it is agreement between the reference algorithms.",
+      vol: "Median ratio of method to reference volume, on nodules the method segmented; 1 means equal volume.",
+      hd95: "Median 95th percentile Hausdorff distance between method and reference masks, in millimeters.",
+      delta: "Multireader datasets (QIBA, LIDC-IDRI, LNDb, QIN): Δ, the median over 107 features of the method's concordance with the readers minus the concordance between readers; negative means lower agreement than between radiologists. QIBA was the prespecified test (margin −0.05). Single-reference datasets (IMD-CT, NSCLC-RG, LUAD-Surv): median concordance with the one reference.",
+      auc: "AUC of an L2-penalized logistic regression on 107 radiomic features from each mask source, patient-grouped fivefold cross-validation repeated three times; missed nodules scored at the training-fold prevalence. Malignancy in IMD-CT, DLCS24 and LUNA25-Dev; radiologist suspicion in LIDC-IDRI and LNDb.",
+      dauc: "Method AUC minus the AUC with reference masks (datasets with reference masks), with 95% CIs from a patient-level bootstrap.",
+      spec: "Specificity when the threshold gives 90% sensitivity.",
+    };
+    document.getElementById("explain").textContent = ex[m];
+  }
+  document.getElementById("heat").addEventListener("mousemove", (ev) => {
+    const td = ev.target.closest("td[data-r]"); if (!td) return tip.hide();
+    const r = td.dataset.r, col = td.dataset.c, c = cell(r, col);
+    const isD = st.metric === "dauc" || (st.metric === "delta" && c.kind === "delta");
+    let h = `<b>${r}</b> · ${col}<br>${isD ? ci3([c.v, ...c.ci]) : st.metric === "pct" ? `${c.v.toFixed(1)}%${c.ci ? ` (${c.ci[0].toFixed(1)}, ${c.ci[1].toFixed(1)})` : ""}` : ["vol", "hd95"].includes(st.metric) ? `${c.v.toFixed(2)} (${c.ci[0].toFixed(2)}, ${c.ci[1].toFixed(2)})` : ci2([c.v, ...c.ci])}<br><span style="opacity:.8">${c.n}</span>`;
+    if (c.kind === "ccc") h += `<br><span style="opacity:.8">median CCC with the single reference</span>`;
+    if (c.note) h += `<br><span style="opacity:.8">${c.note}</span>`;
+    if (METHODS.includes(r) && st.cols === "ds" && train[r][col]) h += `<br><span style="opacity:.8">Training data: ${train[r][col]}</span>`;
+    tip.show(h, ev);
+  });
+  document.getElementById("heat").addEventListener("mouseleave", () => tip.hide());
+  document.getElementById("metric").onchange = (e) => { st.metric = e.target.value; render(); };
+  for (const id of ["cols", "vals"]) document.getElementById(id).addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    [...b.parentNode.children].forEach((x) => x.classList.toggle("on", x === b));
+    if (id === "cols") st.cols = b.dataset.v; else st.vals = b.dataset.v === "on";
+    render();
+  });
+  const q = new URLSearchParams(location.search).get("metric");
+  if (q) { st.metric = q; document.getElementById("metric").value = q; }
+  render();
+</script>

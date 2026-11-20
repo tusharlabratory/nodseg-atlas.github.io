@@ -1,0 +1,124 @@
+---
+import Base from "../layouts/Base.astro";
+---
+<Base title="Radiomic features" active="/features" description="Agreement of 107 radiomic features with radiologists for eight segmentation configurations.">
+  <div class="page-head"><div class="wrap">
+    <h1>Radiomic features</h1>
+    <p>Does a method's mask give the same radiomic values as a radiologist's outline? Each square is one of 107 PyRadiomics features: its Lin concordance correlation coefficient (CCC) across nodules between the method and the readers, next to the agreement between readers themselves.</p>
+  </div></div>
+  <div class="wrap">
+    <div class="controls">
+      <label>Dataset
+        <select id="ds">
+          <option value="QIBA" selected>QIBA (five radiologists; prespecified test)</option>
+          <option value="LIDC-IDRI">LIDC-IDRI (radiologist outlines)</option>
+          <option value="LNDb">LNDb (radiologist outlines)</option>
+          <option value="QIN">QIN (algorithm masks)</option>
+          <option value="IMD-CT">IMD-CT (single reference)</option>
+          <option value="NSCLC-RG">NSCLC-RG (single reference)</option>
+          <option value="LUAD-Surv">LUAD-Surv (single reference)</option>
+        </select>
+      </label>
+      <label>Color
+        <div class="seg" id="mode"><button data-v="ccc" class="on">CCC</button><button data-v="diff">Method minus inter-reader</button></div>
+      </label>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div class="scroll-x"><div id="grid"></div></div>
+    <h2>Summary</h2>
+    <p class="muted" id="sumnote"></p>
+    <div class="scroll-x"><table class="heat" id="fam"></table></div>
+    <p class="note" style="margin-top:14px">Δ is the median over the 107 features of the method's CCC minus the inter-reader CCC on the nodules the method segmented; negative values mean lower agreement than between radiologists. The prespecified test in QIBA required the lower 95% bound of Δ above −0.05 and a miss rate whose upper 95% bound was 10% or less; no configuration met it. VoxTell in QIBA is shown on its prespecified set of 20 nodules in eight patients outside its training data. The color threshold of 0.85 was chosen before the analysis.</p>
+  </div>
+</Base>
+
+<style is:global>
+  .fgrid2 { display: grid; gap: 2px 10px; align-items: center; font-size: .82rem; }
+  .fgrid2 .nm { text-align: right; font-weight: 600; white-space: nowrap; }
+  .fgrid2 .nm a { color: var(--head); }
+  .dots { display: flex; gap: 1px; }
+  .dots i { width: 6px; height: 16px; display: inline-block; border-radius: 2px; cursor: pointer; }
+  .dots i.gap { width: 5px; background: none !important; cursor: default; }
+  .fgrid2 .val { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
+  .famhead { display: flex; gap: 1px; font-size: .66rem; color: var(--muted); }
+  .famhead span { text-align: center; overflow: hidden; white-space: nowrap; border-top: 2px solid var(--az-red); padding-top: 2px; }
+</style>
+
+<script>
+  import { getJSON, tooltip, BASE, METHODS, f3s, ci3, ci2, BLUES, REDS, NEUTRAL, divColor, inkFor } from "../scripts/lib.js";
+  const tip = tooltip();
+  const [radio, methods] = await Promise.all([getJSON("radiomics.json"), getJSON("methods.json")]);
+  const mid = Object.fromEntries(methods.map((m) => [m.name, m.id]));
+  const st = { ds: "QIBA", mode: "ccc" };
+  const FAMS = ["Shape", "First order", "GLCM", "GLRLM", "GLSZM", "GLDM", "NGTDM"];
+  const FKEY = { Shape: "shape", "First order": "firstorder", GLCM: "glcm", GLRLM: "glrlm", GLSZM: "glszm", GLDM: "gldm", NGTDM: "ngtdm" };
+  const MULTI = ["QIBA", "LIDC-IDRI", "LNDb", "QIN"];
+  // CCC color: blue above 0.85 (darker = higher), orange-red below (darkest below 0.40), as the article's Figure 5
+  function cccColor(v) {
+    if (v == null) return "#eef1f4";
+    if (v >= 0.85) return BLUES[Math.min(4, Math.floor((v - 0.85) / 0.03))];
+    if (v < 0.4) return "#850000";
+    return ["#C62840", "#D45E70", "#E08996", "#F2C4CC"][Math.min(3, Math.floor((v - 0.4) / 0.1125))];
+  }
+  function famOf(f) { const k = f.split("_")[0]; return { shape: "Shape", firstorder: "First order", glcm: "GLCM", glrlm: "GLRLM", glszm: "GLSZM", gldm: "GLDM", ngtdm: "NGTDM" }[k] ?? k; }
+  function render() {
+    const multi = MULTI.includes(st.ds);
+    document.querySelector('#mode [data-v="diff"]').disabled = !multi;
+    if (!multi) st.mode = "ccc";
+    [...document.getElementById("mode").children].forEach((b) => b.classList.toggle("on", b.dataset.v === st.mode));
+    const base = radio.features[`${st.ds}|all lesions`];
+    const feats = [...base].sort((a, b) => FAMS.indexOf(famOf(a.feature)) - FAMS.indexOf(famOf(b.feature)));
+    const pre = st.ds === "QIBA" ? Object.fromEntries(radio.features["QIBA|prespecified VoxTell set (8 unseen patients)"].map((x) => [x.feature, x])) : null;
+    const rows = (multi ? ["Inter-reader agreement"] : []).concat(METHODS);
+    const counts = FAMS.map((f) => feats.filter((x) => famOf(x.feature) === f).length);
+    let h = `<div class="fgrid2" style="grid-template-columns:auto auto auto">`;
+    h += `<div></div><div class="famhead">${FAMS.map((f, i) => `<span style="width:${counts[i] * 7 - 1}px;margin-right:6px">${counts[i] >= 9 || f === "Shape" ? f : f.slice(0, 5)}</span>`).join("")}</div><div class="val" style="font-size:.72rem">${multi ? "Δ (95% CI)" : "median CCC"}</div>`;
+    for (const r of rows) {
+      const isIR = r === "Inter-reader agreement";
+      const sumRow = isIR ? null : radio.summary.find((q) => q.dataset === st.ds && q.method === r && q.set === (st.ds === "QIBA" && r === "VoxTell" ? "prespecified VoxTell set (8 unseen patients)" : "all lesions"));
+      h += `<div class="nm">${isIR ? `<i>${st.ds === "QIN" ? "Between algorithms" : "Inter-reader"}</i>` : `<a href="${BASE}/methods/${mid[r]}/">${r}</a>`}</div><div class="dots">`;
+      let prevFam = null;
+      for (const f of feats) {
+        const fam = famOf(f.feature);
+        if (prevFam && fam !== prevFam) h += `<i class="gap"></i>`;
+        prevFam = fam;
+        const src = r === "VoxTell" && pre ? pre[f.feature] : f;
+        const v = isIR ? f.ccc_rr : src?.ccc[r];
+        const rr = src?.ccc_rr;
+        const col = st.mode === "diff" && !isIR ? (v == null ? "#eef1f4" : divColor(v - rr)) : cccColor(v);
+        h += `<i style="background:${col}" data-f="${f.feature}" data-r="${r}" data-v="${v ?? ""}" data-rr="${rr ?? ""}"></i>`;
+      }
+      const txt = isIR ? (sumRow ? "" : `median ${radio.summary.find((q) => q.dataset === st.ds && q.set === "all lesions").median_ccc_rr.toFixed(2)}`) : multi ? ci3(sumRow.delta) : ci2(sumRow.median_ccc);
+      h += `</div><div class="val">${txt}${sumRow ? ` <span style="opacity:.7">· ${sumRow.n_seg}/${sumRow.n}</span>` : ""}</div>`;
+    }
+    document.getElementById("grid").innerHTML = h + "</div>";
+    const lg = document.getElementById("legend");
+    lg.innerHTML = st.mode === "ccc"
+      ? `<span>CCC</span><span class="ramp"><i style="background:#850000"></i>${["#C62840", "#D45E70", "#E08996", "#F2C4CC"].map((c) => `<i style="background:${c}"></i>`).join("")}${BLUES.map((c) => `<i style="background:${c}"></i>`).join("")}</span><span>&lt;0.40 · 0.85 · 1.00 (below 0.85 in red)</span>`
+      : `<span>Method lower</span><span class="ramp">${[...REDS].reverse().map((c) => `<i style="background:${c}"></i>`).join("")}<i style="background:${NEUTRAL}"></i>${BLUES.map((c) => `<i style="background:${c}"></i>`).join("")}</span><span>Method higher than inter-reader (bins ±0.02, 0.05, 0.10, 0.20, 0.30)</span>`;
+    // family summary table
+    const fr = METHODS.map((mname) => radio.summary.find((q) => q.dataset === st.ds && q.method === mname && q.set === (st.ds === "QIBA" && mname === "VoxTell" ? "prespecified VoxTell set (8 unseen patients)" : "all lesions")));
+    let t = `<thead><tr><th></th>${FAMS.map((f) => `<th>${f}</th>`).join("")}</tr></thead><tbody>`;
+    fr.forEach((x) => {
+      t += `<tr><th class="row"><a href="${BASE}/methods/${mid[x.method]}/">${x.method}</a></th>`;
+      FAMS.forEach((f) => {
+        const v = multi ? x.family_delta[FKEY[f]] : x.family_ccc[FKEY[f]];
+        if (!v || v[0] == null) { t += `<td class="na">–</td>`; return; }
+        const bg = multi ? divColor(v[0]) : cccColor(v[0]);
+        t += `<td style="background:${bg};color:${inkFor(bg)};width:70px" title="${multi ? ci3(v) : ci2(v)}">${multi ? f3s(v[0]).replace("0.", ".") : v[0].toFixed(2).replace("0.", ".")}</td>`;
+      });
+      t += "</tr>";
+    });
+    document.getElementById("fam").innerHTML = t + "</tbody>";
+    document.getElementById("sumnote").textContent = multi ? "Δ by feature family (median over the family's features of method CCC minus inter-reader CCC). Hover a cell for its 95% CI." : "Median CCC with the single reference by feature family. Hover a cell for its 95% CI.";
+  }
+  document.getElementById("grid").addEventListener("mousemove", (ev) => {
+    const i = ev.target.closest("i[data-f]"); if (!i) return tip.hide();
+    const v = i.dataset.v, rr = i.dataset.rr;
+    tip.show(`<b>${i.dataset.f}</b><br>${i.dataset.r}: CCC ${v === "" ? "NA" : (+v).toFixed(3)}${rr !== "" && i.dataset.r !== "Inter-reader agreement" ? `<br>Inter-reader: ${(+rr).toFixed(3)}<br>Difference: ${v === "" ? "NA" : f3s(+v - +rr)}` : ""}`, ev);
+  });
+  document.getElementById("grid").addEventListener("mouseleave", () => tip.hide());
+  document.getElementById("ds").onchange = (e) => { st.ds = e.target.value; render(); };
+  document.getElementById("mode").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b || b.disabled) return; st.mode = b.dataset.v; render(); });
+  render();
+</script>

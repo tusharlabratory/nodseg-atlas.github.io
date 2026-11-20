@@ -1,0 +1,104 @@
+---
+import Base from "../../layouts/Base.astro";
+import Forest from "../../components/Forest.astro";
+import datasets from "../../data/datasets.json";
+import rowsOrder from "../../data/table1_rows.json";
+import seg from "../../data/segmentation.json";
+import radio from "../../data/radiomics.json";
+import cls from "../../data/classification.json";
+import figures from "../../data/figures.json";
+
+export function getStaticPaths() {
+  return datasets.map((d) => ({ params: { id: d.id }, props: { d } }));
+}
+const { d } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const METHODS = ["nnInteractive", "TotalSegmentator", "MedSAM2", "PiNS", "VoxTell", "VISTA3D-Auto", "VISTA3D-Point", "SAM-Med3D"];
+const COL: Record<string, string> = { "nnInteractive": "#0C234B", "TotalSegmentator": "#AB0520", "MedSAM2": "#3D92C8", "PiNS": "#7F8B5A",
+  "VoxTell": "#C9A227", "VISTA3D-Auto": "#8E6BBF", "VISTA3D-Point": "#4BA3CF", "SAM-Med3D": "#7A8696" };
+const clean = (s: string) => s.replace(/\\/g, "").replace(/[†‡§#*]/g, "").trim();
+const HEAD = new Set(["Sex", "Race or ethnicity", "Smoking status", "Diameter category", "Nodule attenuation"]);
+const t1 = rowsOrder.map((k) => ({ k: clean(k), v: (d.table1 as any)[k] ?? "", head: HEAD.has(clean(k)) })).filter((r) => r.head || (r.v && r.v !== "NA" && r.v !== "–"));
+const AN: Record<string, string> = { seg: "Segmentation performance", radiomics: "Radiomic similarity", repeat: "Test–retest repeatability", cls: "Classification" };
+const ts = (t: string) => (t.startsWith("Yes") ? "In training data" : t.startsWith("Partly") ? "Partly" : t.startsWith("Possibly") ? "Possibly" : t.startsWith("Undisclosed") ? "Not disclosed" : "Outside");
+const segRows = METHODS.map((m) => seg.by_dataset.find((q) => q.dataset === d.name && q.method === m)).filter(Boolean) as any[];
+const inter = seg.by_dataset.find((q) => q.dataset === d.name && (q.method === "Inter-reader agreement" || q.method === "Algorithm agreement (QIN)")) as any;
+const multi = ["QIBA", "LIDC-IDRI", "LNDb", "QIN"].includes(d.name);
+const radRows = METHODS.map((m) => {
+  const set = d.name === "QIBA" && m === "VoxTell" ? "prespecified VoxTell set (8 unseen patients)" : "all lesions";
+  const x = radio.summary.find((q) => q.dataset === d.name && q.method === m && q.set === set) as any;
+  if (!x) return null;
+  const v = multi ? x.delta : x.median_ccc;
+  return { label: m + (set !== "all lesions" ? " (prespecified 20)" : ""), est: v[0], lo: v[1], hi: v[2], color: COL[m], sub: `· ${x.n_seg} of ${x.n}` };
+}).filter(Boolean) as any[];
+const clsRows = cls.filter((q) => q.dataset === d.name && ["reference", "method", "baseline"].includes(q.kind)).map((x) => ({
+  label: x.source, est: x.auc[0], lo: x.auc[1], hi: x.auc[2], color: COL[x.source] ?? "#1a1a1a", bold: x.kind !== "method",
+  sub: x.kind === "method" ? `· ${x.n_seg} of ${x.n}` : "" }));
+clsRows.sort((a, b) => (a.bold === b.bold ? b.est - a.est : a.bold ? -1 : 1));
+const task = cls.find((q) => q.dataset === d.name)?.task;
+const fig = d.example_figure ? figures.find((f) => f.id === d.example_figure) : null;
+---
+<Base title={d.name} active="/datasets" description={`${d.name}: ${d.full_name}. Segmentation results of eight configurations.`}>
+  <div class="page-head"><div class="wrap">
+    <p style="margin-bottom:6px"><a href={`${base}/datasets/`}>← All datasets</a></p>
+    <h1>{d.name}</h1>
+    <p>{d.full_name}{d.reference_standard ? ` · reference: ${d.reference_standard}` : " · nodule locations and malignancy labels, no reference segmentations"}</p>
+  </div></div>
+  <div class="wrap">
+    <section class="two">
+      <div>
+        <h2 style="margin-top:0">Characteristics</h2>
+        <table class="tbl">
+          {t1.map((r) => r.head ? <tr><td colspan="2" style="font-weight:700;color:var(--head);background:var(--panel)">{r.k}</td></tr> : <tr><td style="width:46%;color:var(--muted);font-weight:600">{r.k}</td><td>{r.v}</td></tr>)}
+        </table>
+        <p class="muted" style="font-size:.8rem;margin-top:8px">From Table 1: age as mean ± SD (number with age reported); diameter as median (IQR) of the reference mask; categories as number (%).</p>
+        <p class="muted" style="font-size:.85rem">Source: {d.reference.replace(/ doi:\S+$/, "")} {d.doi && <a href={`https://doi.org/${d.doi}`}>doi:{d.doi}</a>}</p>
+      </div>
+      <div>
+        <h2 style="margin-top:0">Used in</h2>
+        <div>{d.analyses.map((a) => <span class="pill">{AN[a]}</span>)}</div>
+        <h2>Training data of each method</h2>
+        <table class="tbl">
+          {METHODS.map((m) => <tr><td><a href={`${base}/methods/${m.toLowerCase()}/`}>{m}</a></td><td><b>{ts((d.training as any)[m])}</b>{(d.training as any)[m].includes("(") && <span class="muted"> {(d.training as any)[m].slice((d.training as any)[m].indexOf("("))}</span>}</td></tr>)}
+        </table>
+      </div>
+    </section>
+    {segRows.length > 0 && (
+      <section>
+        <h2 style="margin-top:0">Segmentation performance</h2>
+        {inter && <p class="muted">{inter.method === "Inter-reader agreement" ? "Inter-reader agreement" : "Agreement between the reference algorithms"}: median Dice {inter.dice[0].toFixed(2)} ({inter.dice[1].toFixed(2)}, {inter.dice[2].toFixed(2)}), shaded.</p>}
+        <div class="scroll-x"><table class="tbl">
+          <thead><tr><th>Method</th><th>Nodules segmented</th><th>Median Dice (95% CI)</th><th>Dice IQR</th><th>Volume ratio</th><th>HD95, mm</th></tr></thead>
+          <tbody>
+            {segRows.map((x) => (
+              <tr><td><a href={`${base}/methods/${x.method.toLowerCase()}/`}><b>{x.method}</b></a></td><td class="num">{x.pct.toFixed(1)}% ({x.n_seg} of {x.n})</td>
+                <td class="num">{x.dice[0].toFixed(2)} ({x.dice[1].toFixed(2)}, {x.dice[2].toFixed(2)})</td><td class="num">{x.dice_iqr[0].toFixed(2)}–{x.dice_iqr[1].toFixed(2)}</td>
+                <td class="num">{x.vol_ratio[0]?.toFixed(2)}</td><td class="num">{x.hd95[0]?.toFixed(1)}</td></tr>
+            ))}
+          </tbody>
+        </table></div>
+      </section>
+    )}
+    {radRows.length > 0 && (
+      <section>
+        <h2 style="margin-top:0">Radiomic agreement</h2>
+        <p class="muted">{multi ? "Δ, the median over 107 features of the method's concordance with the readers minus the concordance between readers on the same nodules; negative means lower agreement than between radiologists." : "Median over 107 features of the concordance between the method and the single reference segmentation (no inter-reader comparison)."}</p>
+        <Forest rows={radRows} xmin={multi ? -0.9 : 0} xmax={multi ? 0.1 : 1} refline={multi ? 0 : null} xlabel={multi ? "Δ (95% CI)" : "Median CCC (95% CI)"} labelw={240} digits={multi ? 3 : 2} />
+      </section>
+    )}
+    {clsRows.length > 0 && (
+      <section>
+        <h2 style="margin-top:0">Classification: {task?.toLowerCase()}</h2>
+        <p class="muted">AUC of an L2-penalized logistic regression on 107 radiomic features from each mask source, patient-grouped fivefold cross-validation repeated three times; missed nodules scored at the training-fold prevalence. Bold rows are reference masks and baselines.</p>
+        <Forest rows={clsRows} xmin={0.3} xmax={1} refline={0.5} xlabel="AUC (95% CI)" labelw={200} />
+      </section>
+    )}
+    {fig && (
+      <section>
+        <h2 style="margin-top:0">Example segmentations</h2>
+        <a href={`${base}/data/${fig.file}`} target="_blank" rel="noopener"><img src={`${base}/data/${fig.file}`} alt={`Segmentation examples in ${d.name}`} loading="lazy" style="width:100%;height:auto;border-radius:8px;border:1px solid var(--line)" /></a>
+        <p class="muted" style="font-size:.82rem">Figure {fig.id}: {fig.legend}</p>
+      </section>
+    )}
+  </div>
+</Base>
